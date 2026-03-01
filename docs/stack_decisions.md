@@ -35,9 +35,9 @@ Default tier intent:
 ```python
 AGENT_MODEL_MAP = {
     # Stage 0-2 / high-volume extraction
-    "arena_scout": "qwen-3.5-35b-a3b",
-    "signal_scout": "qwen-3.5-35b-a3b",
-    "normalizer": "qwen-3.5-35b-a3b",
+    "arena_scout": "minimax-M2.5",
+    "signal_scout": "minimax-M2.5",
+    "normalizer": "minimax-M2.5",
 
     # Synthesis and planning
     "arena_evaluator": "glm-5",
