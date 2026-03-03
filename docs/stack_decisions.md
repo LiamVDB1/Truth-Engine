@@ -25,6 +25,27 @@ Unified provider interface (OpenAI, Anthropic, Google, open-weight/local endpoin
 
 All agent outputs are typed models, never free-form blobs. Schema failures auto-retry. This enforces "structured evidence, not vibes" at the contract layer.
 
+## Search & Scraping: Serper + Scrapling + trafilatura + PRAW
+
+Search and page extraction are split into separate concerns, each handled by the best tool for the job.
+
+| Concern | Tool | Why |
+|---------|------|-----|
+| Search / URL discovery | Serper.dev | Google SERP API. Best coverage, cheapest ($0.001/query). Structured metadata (PAA, related searches) feeds Arena Scout. |
+| Page fetching | Scrapling (`StealthyFetcher`) | Cloudflare Turnstile bypass for G2/Capterra. TLS fingerprint impersonation. Headless browser with anti-bot. Free, self-hosted (`pip install`). |
+| Content extraction | trafilatura | Strips boilerplate, extracts main content from raw HTML. No per-site config. Free. |
+| Reddit | PRAW | Official API. Structured data (upvotes, scores, subreddit metadata) that scraping can't replicate. |
+
+Alternatives considered:
+- Tavily: bundled search+extraction, but proprietary index with coverage gaps and 10x more expensive.
+- Jina Reader: simple API but no Cloudflare bypass — fails on priority sources (G2, Capterra).
+- Exa: semantic search, but our queries are keyword-based. 5x cost for no benefit.
+- Crawl4AI: good extraction but generic stealth vs Scrapling's targeted Turnstile bypass.
+
+Future swap option: if trafilatura quality isn't sufficient, the extraction interface (`extract(url) → str`) can swap to Jina ReaderLM V2 API per-source without changing agent code.
+
+See `docs/scraping_strategy.md` for the full pipeline, source targets, and cost breakdown.
+
 ## Model Routing: Config, Not Code
 
 Default tier intent:
@@ -50,8 +71,8 @@ AGENT_MODEL_MAP = {
     # High-stakes reasoning and closing
     "skeptic": "gpt-5.3-codex",
     "wedge_critic": "gpt-5.3-codex",
-    "conversation_agent": "gpt-5.3-codex",
-    "commitment_closer": "gpt-5.3-codex",
+    "conversation_agent": "gpt-5.2",
+    "commitment_closer": "gpt-5.2",
 }
 ```
 

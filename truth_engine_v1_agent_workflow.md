@@ -23,7 +23,8 @@ flowchart TD
     AG -- No --> SKIP[Skip + Archive Arena]
     AG -- Yes --> SS[Signal Scout]
     SS --> NM[Normalizer]
-    NM --> SC[Scorer]
+    NM --> LS[Landscape Scout]
+    LS --> SC[Scorer]
     SC --> SK[Skeptic]
     SK --> GA{Gate A}
     GA -- "< 40: Kill" --> KILL[Kill + Archive + Learn]
@@ -238,9 +239,8 @@ The tool-based approach means the agent doesn't carry 200 signals in its context
 ```
 SignalMiningResult:
   sources_searched: int
-  sources_skipped_dedup: int
   search_summary: str
-  # signals are already stored via add_signal tool calls
+  # signals are already stored via add_signal tool calls, so is sources skipped due to dedup
 ```
 
 **RawSignal schema (used in `add_signal`):**
@@ -281,7 +281,7 @@ Cluster raw signals into coherent ProblemUnits. Transform messy real-world data 
 
 ### Agent
 
-**Normalizer** | Tier 1
+**Normalizer** | Tier 2
 
 **What it does:**
 1. Groups raw signals by inferred job-to-be-done (semantic clustering)
@@ -332,15 +332,15 @@ ProblemUnit:
 - 5-10 signals, 2-3 source types → 0.45
 - 10+ signals, 3+ source types → 0.50 (cap for scraped data)
 
-**Budget:** €0.15
+**Budget:** €0.20
 
 ---
 
-## Stage 3: Scoring + Skeptic
+## Stage 3: Landscape + Scoring + Skeptic
 
 ### Purpose
 
-Evaluate ProblemUnit quality. Score brutally, challenge assumptions, and optionally investigate weaknesses. The feedback loop ensures borderline candidates get a fair shot without becoming zombies.
+Research the competitive landscape, score ProblemUnit quality with full market context, then challenge assumptions. The feedback loop ensures borderline candidates get a fair shot without becoming zombies.
 
 ### Agents
 
@@ -356,7 +356,7 @@ Scores each ProblemUnit on a weighted rubric with anchored examples. Picks the t
 | Pain frequency | 10 | 10% | 3: "quarterly/rare" / 6: "weekly" / 10: "daily or continuous" |
 | Urgency | 10 | 10% | 3: "no deadline, whenever they get to it" / 7: "seasonal deadline or budget cycle" / 10: "regulatory deadline, contractual obligation, imminent cost" |
 | Proof of spend | 20 | 20% | 5: "no evidence of spending" / 10: "they mention using free tools or manual workarounds" / 15: "they mention paid tools or hired roles" / 20: "multiple signals of established budget lines" |
-| Reachability | 15 | 15% | 5: "ICP exists but no clear online channel" / 10: "active on 1-2 platforms" / 15: "highly active on multiple accessible platforms" |
+| Evidence strength | 15 | 15% | 5: "1-2 signals from a single source type" / 10: "5-10 signals from 2-3 source types" / 15: "10+ signals from 3+ diverse source types with high convergence" |
 | Buyer authority clarity | 10 | 10% | 3: "unclear who decides" / 7: "buyer role identifiable" / 10: "buyer role + budget signals clear" |
 | Founder advantage | 10 | 10% | 3: "no special access or knowledge" / 7: "relevant domain interest" / 10: "direct expertise or network in this space" |
 | Switching friction | -7 | penalty | -2: "low friction, easy to adopt" / -5: "moderate, requires workflow change" / -7: "high, deep integration with existing tools, org-wide change needed" |
@@ -368,7 +368,9 @@ Scores each ProblemUnit on a weighted rubric with anchored examples. Picks the t
 ```
 problem_units: list[ProblemUnit]
 arena: EvaluatedArena
-past_learnings: list[LearningEntry]   # relevant scoring learnings
+landscape_report: LandscapeReport       # from Landscape Scout
+landscape_entries: list[LandscapeEntry]  # from Landscape Scout — informs Crowdedness + Switching friction
+past_learnings: list[LearningEntry]      # relevant scoring learnings
 ```
 
 **Output:**
@@ -391,16 +393,87 @@ ScoredCandidate:
 
 ---
 
+**Landscape Scout** | Tier 1 | **Tool-based agent**
+
+Researches the competitive and historical landscape for this problem space. Maps active competitors, failed attempts, adjacent solutions, and open-source alternatives. Feeds structured findings to the Skeptic so it has real market context instead of relying on LLM training data.
+
+**What it searches for:**
+
+| Search Pattern | Source | What It Reveals |
+|---|---|---|
+| "[tool category] software" / "[JTBD] tool" | G2, Capterra, Google | Active competitors — who's in this space now |
+| "[competitor name] pricing" / "[competitor name] reviews" | G2, Capterra, web | Competitor positioning, pricing, weaknesses |
+| "[tool category] alternative" / "best [tool category]" | Google, Reddit, forums | Market awareness, switching intent, unmet needs |
+| "[problem domain] startup failed" / "post-mortem" | Web, HackerNews | Companies that tried and died — and why |
+| "[problem domain]" repositories, archived/inactive | GitHub | Open-source alternatives and abandoned attempts |
+| "[competitor name] pivot" / "shut down" / "layoffs" | Web, X | Companies that tried this space and left |
+
+**Tools (available to the agent during search):**
+
+| Tool | What It Does | Returns |
+|---|---|---|
+| `add_landscape_entry(entry_data)` | Saves a LandscapeEntry. Max 15 findings. | Success + count so far |
+| `view_landscape()` | Returns summaries of all findings so far | Compact list of `{id, name, status, type, relevance}` |
+
+**Input (system context):**
+```
+problem_units: list[ProblemUnit]   # from Normalizer
+arena: EvaluatedArena
+```
+
+**Final output (after search is complete):**
+```
+LandscapeReport:
+  sources_searched: int
+  search_summary: str
+  active_competitor_count: int
+  dead_attempt_count: int
+  open_source_count: int
+  market_density: str              # "empty" (0-1 active), "emerging" (2-4), "established" (5+), "saturated" (10+ with dominant players)
+  # entries are already stored via add_landscape_entry tool calls
+```
+
+**LandscapeEntry schema (used in `add_landscape_entry`):**
+```
+LandscapeEntry:
+  name: str                        # company, product, or repo name
+  type: str                        # active_competitor, dead_attempt, open_source, adjacent_solution
+  status: str                      # active, growing, stagnant, failed, pivoted, shut_down, abandoned
+  source_url: str
+  what_they_do: str                # one sentence
+  relevance: str                   # direct_competitor, partial_overlap, adjacent, same_jtbd_different_icp
+  strengths: list[str] | null      # what they do well (for active competitors)
+  weaknesses: list[str] | null     # known weaknesses, common complaints
+  pricing: str | null              # pricing model if known
+  failure_reason: str | null       # why it failed/shut down (if applicable)
+  years_active: str | null         # "2019-present" or "2019-2021"
+  funding_raised: str | null       # "$2M seed" (if known)
+  lesson_for_us: str               # what this means for our candidate
+```
+
+**Agent workflow:**
+1. Construct search queries from the ProblemUnit's JTBD, domain, and ICP
+2. Search for active competitors first (most valuable context)
+3. Search for failed attempts and abandoned repos
+4. For each relevant finding → `add_landscape_entry(...)` → get running count
+5. `view_landscape()` to assess market density and spot patterns
+6. Stop when: sources exhausted, 15 findings reached, or clear picture emerges
+7. Return search summary with `market_density` assessment
+
+**Budget:** €0.10
+
+---
+
 **Skeptic** | Tier 3
 
-Challenges the top candidate. Looks for inflated scores, missing evidence, overlooked risks, and prior failures.
+Challenges the top candidate. Looks for inflated scores, missing evidence, overlooked risks, and landscape red flags.
 
 **What it specifically checks:**
 1. **Evidence integrity:** Are the cited sources real and do they actually support the claimed score? (catches LLM hallucination)
 2. **Severity inflation:** Is the pain as severe as scored, or is it just vocal minorities?
 3. **Proof-of-spend reality:** Do the "proof of spend" signals actually indicate budget, or just free-tool usage?
 4. **Switching friction undercount:** Is switching harder than estimated? Are there integrations, compliance, or org-change barriers?
-5. **Prior attempts:** Has someone tried to solve this before? What happened? Why did they fail?
+5. **Landscape analysis:** What does the competitive landscape look like? Is there a pattern of failure? Are active competitors too strong? Is there differentiation room? Has the landscape changed since past failures?
 6. **Selection bias:** Are the signals representative, or do they come from a narrow demographic?
 
 **Input:**
@@ -408,6 +481,8 @@ Challenges the top candidate. Looks for inflated scores, missing evidence, overl
 top_candidate: ScoredCandidate
 problem_unit: ProblemUnit
 evidence_items: list[RawSignal]    # the actual evidence behind this candidate
+landscape_report: LandscapeReport
+landscape_entries: list[LandscapeEntry]  # from Landscape Scout
 arena: EvaluatedArena
 ```
 
@@ -419,7 +494,8 @@ SkepticReport:
   risk_flags: list[str]            # specific weaknesses found
   missing_evidence: list[str]      # what evidence would strengthen or weaken the case
   disconfirming_signals: list[str] # evidence that contradicts the hypothesis
-  prior_attempts: list[str]        # known companies/products that tried this
+  landscape_assessment: str        # "open" (few competitors, no failure pattern), "contested" (active competitors but room exists), "dangerous" (strong incumbents or repeated failures for structural reasons)
+  landscape_detail: str            # summary of what the competitive/historical landscape reveals
   inflated_dimensions: list[str]   # dimensions where score seems too high
   primary_weakness: str            # the single biggest gap (used for targeted evidence pass)
   overall_risk: str                # low, medium, high
@@ -493,7 +569,7 @@ while True:
 | Score 40-69, Skeptic says "advance", score ≥ 50 | Advance with caution flag |
 | Score ≥ 70 | Advance |
 
-**Budget for Stage 3 (total):** €0.30 base + €0.30 max investigation = €0.60 worst case
+**Budget for Stage 3 (total):** €0.40 base (Scorer + Maze Historian + Skeptic) + €0.30 max investigation = €0.70 worst case
 
 ---
 
