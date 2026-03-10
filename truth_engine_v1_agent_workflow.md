@@ -332,7 +332,7 @@ ProblemUnit:
 - 5-10 signals, 2-3 source types → 0.45
 - 10+ signals, 3+ source types → 0.50 (cap for scraped data)
 
-**Budget:** €0.20
+**Budget:** €0.15
 
 ---
 
@@ -569,7 +569,7 @@ while True:
 | Score 40-69, Skeptic says "advance", score ≥ 50 | Advance with caution flag |
 | Score ≥ 70 | Advance |
 
-**Budget for Stage 3 (total):** €0.40 base (Scorer + Maze Historian + Skeptic) + €0.30 max investigation = €0.70 worst case
+**Budget for Stage 3 (total):** €0.30 base (Landscape Scout + Scorer + Skeptic) + €0.30 max investigation = €0.60 worst case
 
 ---
 
@@ -1039,7 +1039,7 @@ Every LLM call logs to `cost_log` table: `candidate_id, agent, model, input_toke
 | 1 | Arena Scout | 0 | 1 | Wide search for promising arenas |
 | 2 | Arena Evaluator | 0 | 2 | Score and rank arenas |
 | 3 | Signal Scout | 1 (+3 targeted) | 1 | Mine pain/spend signals from sources |
-| 4 | Normalizer | 2 (+3 integration) | 1 | Cluster raw signals into ProblemUnits |
+| 4 | Normalizer | 2 (+3 integration) | 2 | Cluster raw signals into ProblemUnits |
 | 5 | Scorer | 3 | 2 | Score ProblemUnits on anchored rubric |
 | 6 | Skeptic | 3 | 3 | Challenge assumptions, find gaps |
 | 7 | Wedge Designer | 4 | 2 | Propose solution hypotheses |

@@ -1,0 +1,327 @@
+{
+  "candidate_id": "cand_logistics_ops",
+  "arena": {
+    "arena": {
+      "id": "arena_logistics",
+      "domain": "Logistics operations",
+      "icp_user_role": "Operations Manager",
+      "icp_buyer_role": "VP Operations",
+      "geo": "EU + US",
+      "channel_surface": [
+        "email",
+        "linkedin",
+        "reddit"
+      ],
+      "solution_modality": "saas",
+      "market_signals": [
+        "500+ coordinator job postings mention spreadsheet-heavy workflows",
+        "Reddit threads complain about shipment update chaos"
+      ],
+      "signal_sources": [
+        "https://example.com/jobs/logistics",
+        "https://reddit.com/r/logistics/comments/test"
+      ],
+      "market_size_signal": "500+ active ops roles plus paid incumbent tools",
+      "expected_sales_cycle": "2-4 weeks",
+      "rationale": "The space shows visible pain, identifiable buyers, and software-first workarounds."
+    },
+    "score": 74,
+    "dimension_scores": {
+      "pain_signal_visibility": 16,
+      "market_size_signal": 18,
+      "icp_reachability": 15,
+      "spend_indicators": 10,
+      "competition_landscape": 7,
+      "founder_constraint_fit": 8
+    },
+    "dimension_rationale": {
+      "pain_signal_visibility": "Pain is visible in both jobs data and complaint threads.",
+      "market_size_signal": "The arena is large enough to support software spend."
+    },
+    "viability_verdict": "viable",
+    "risks": [
+      "Competitive space needs sharper differentiation"
+    ],
+    "recommended_first_sources": [
+      "reddit",
+      "job_postings",
+      "web"
+    ]
+  },
+  "problem_unit": {
+    "id": "pu_logistics_updates",
+    "job_to_be_done": "Coordinate shipment exception updates across carrier, warehouse, and customer teams",
+    "trigger_event": "A shipment misses its planned handoff or ETA",
+    "frequency": "daily",
+    "severity": 8,
+    "urgency": "Customers escalate quickly when updates are late",
+    "cost_of_failure": "Lost time, angry customers, and avoidable credits",
+    "current_workaround": "Spreadsheets, Slack, and manual follow-up",
+    "proof_of_spend": "Headcount and paid logistics tooling both show established spend",
+    "switching_friction": 5,
+    "buyer_authority": "VP Operations",
+    "evidence_ids": [
+      "sig_1",
+      "sig_2",
+      "sig_3",
+      "sig_4",
+      "sig_5"
+    ],
+    "signal_count": 5,
+    "source_diversity": 3,
+    "confidence": 0.45
+  },
+  "top_evidence": [
+    {
+      "id": "sig_1",
+      "source_type": "reddit",
+      "source_url": "https://reddit.com/r/logistics/comments/abc/?utm_source=test",
+      "source_url_hash": "643c42d1098870c6",
+      "verbatim_quote": "We still push shipment exceptions around in spreadsheets every day.",
+      "persona": "Operations manager",
+      "inferred_pain": "Shipment exceptions are coordinated manually.",
+      "inferred_frequency": "daily",
+      "proof_of_spend": false,
+      "switching_signal": true,
+      "tags": [
+        "shipment_updates",
+        "spreadsheets"
+      ],
+      "reliability_score": 0.4,
+      "extracted_at": "2026-03-10T21:44:17.668780Z"
+    },
+    {
+      "id": "sig_2",
+      "source_type": "job_post",
+      "source_url": "https://example.com/jobs/logistics-manager",
+      "source_url_hash": "5ff2bc5c09be6b02",
+      "verbatim_quote": "Own inbound exception management across carrier, warehouse, and customer teams.",
+      "persona": "Hiring manager",
+      "inferred_pain": "Companies hire people to coordinate exceptions manually.",
+      "inferred_frequency": "daily",
+      "proof_of_spend": true,
+      "switching_signal": false,
+      "tags": [
+        "exception_management",
+        "headcount"
+      ],
+      "reliability_score": 0.5,
+      "extracted_at": "2026-03-10T21:44:17.668809Z"
+    },
+    {
+      "id": "sig_3",
+      "source_type": "web",
+      "source_url": "https://example.com/blog/shipment-updates",
+      "source_url_hash": "15c3db6e2657e634",
+      "verbatim_quote": "Customers escalate when update windows slip and nobody knows the source of delay.",
+      "persona": "Operations consultant",
+      "inferred_pain": "Exception visibility gaps create customer escalations.",
+      "inferred_frequency": "daily",
+      "proof_of_spend": false,
+      "switching_signal": true,
+      "tags": [
+        "customer_escalations",
+        "visibility"
+      ],
+      "reliability_score": 0.4,
+      "extracted_at": "2026-03-10T21:44:17.668824Z"
+    },
+    {
+      "id": "sig_4",
+      "source_type": "job_post",
+      "source_url": "https://example.com/jobs/revops-automation",
+      "source_url_hash": "e52fda1ac16278d7",
+      "verbatim_quote": "Experience with paid TMS and workflow automation tooling required.",
+      "persona": "VP Operations",
+      "inferred_pain": "Teams already budget for logistics workflow tooling.",
+      "inferred_frequency": "daily",
+      "proof_of_spend": true,
+      "switching_signal": false,
+      "tags": [
+        "paid_tools",
+        "budget"
+      ],
+      "reliability_score": 0.5,
+      "extracted_at": "2026-03-10T21:44:17.668843Z"
+    },
+    {
+      "id": "sig_5",
+      "source_type": "web",
+      "source_url": "https://example.com/tms/pricing",
+      "source_url_hash": "9c9deaa644e19cac",
+      "verbatim_quote": "Mid-market TMS buyers typically pay for exception dashboards and carrier integrations.",
+      "persona": "Vendor pricing page",
+      "inferred_pain": "Exception management already has budget and pricing anchors.",
+      "inferred_frequency": "monthly",
+      "proof_of_spend": true,
+      "switching_signal": true,
+      "tags": [
+        "pricing",
+        "paid_tools"
+      ],
+      "reliability_score": 0.45,
+      "extracted_at": "2026-03-10T21:44:17.668854Z"
+    }
+  ],
+  "scoring": {
+    "problem_unit_id": "pu_logistics_updates",
+    "total_score": 72,
+    "confidence": 0.61,
+    "confidence_rationale": "Spend signals now support a viable wedge test.",
+    "dimension_scores": {
+      "pain_severity": 12,
+      "pain_frequency": 9,
+      "urgency": 7,
+      "proof_of_spend": 15,
+      "evidence_strength": 10,
+      "buyer_authority_clarity": 8,
+      "founder_advantage": 7,
+      "switching_friction": -4,
+      "crowdedness": -2
+    },
+    "dimension_evidence": {
+      "proof_of_spend": "Both job postings and pricing pages show established tooling budget."
+    },
+    "dimension_rationale": {
+      "proof_of_spend": "The targeted pass closed the main evidence gap."
+    },
+    "weakest_dimensions": [
+      "switching_friction",
+      "crowdedness"
+    ]
+  },
+  "skeptic": {
+    "candidate_id": "cand_logistics_ops",
+    "evidence_integrity": "solid",
+    "risk_flags": [
+      "Switching friction will need onboarding support."
+    ],
+    "missing_evidence": [],
+    "disconfirming_signals": [],
+    "landscape_assessment": "contested",
+    "landscape_detail": "The market is active, but the problem is still underserved in the exception workflow layer.",
+    "inflated_dimensions": [],
+    "primary_weakness": "switching_friction",
+    "overall_risk": "medium",
+    "recommendation": "advance",
+    "recommendation_rationale": "The candidate is now strong enough to design a wedge."
+  },
+  "selected_wedge": {
+    "id": "wedge_1b",
+    "wedge_promise": "We automate shipment exception triage so ops teams deliver faster customer updates without replacing their TMS.",
+    "solution_type": "saas",
+    "key_capability": "Pulls exception events from existing systems, assigns next actions, and drafts customer-facing updates.",
+    "target_outcome": "Reduce update lag and customer escalations within 30 days.",
+    "differentiation": "Adds a focused workflow layer on top of incumbent systems instead of competing as a full platform.",
+    "rough_pricing": "\u20ac750/mo per ops pod",
+    "delivery_complexity": "medium",
+    "mvp_scope": "Exception intake, triage, and outbound update workflow for one warehouse operation.",
+    "first_10_onboarding": "Connect one existing TMS feed and map one escalation workflow.",
+    "switching_ease": "Sidecar rollout with one team before expansion.",
+    "data_advantage": "Captures structured exception-response timing and outcomes."
+  },
+  "channel_validation": {
+    "candidate_id": "cand_logistics_ops",
+    "user_role": "Operations Manager",
+    "buyer_role": "VP Operations",
+    "buyer_is_user": false,
+    "blocker_roles": [
+      "IT integrations lead"
+    ],
+    "procurement_notes": "The sidecar rollout and low initial integration burden keep procurement light.",
+    "channels": [
+      {
+        "channel": "email",
+        "how_to_reach": "Cold email Heads of Ops via filtered logistics lists",
+        "lead_source": "Apollo and carrier-partner prospecting lists",
+        "expected_response_rate": 0.04,
+        "volume_estimate": 40,
+        "message_angle": "Reduce shipment update lag without a rip-and-replace project",
+        "first_20_plan": "Start with 20 Heads of Ops across 3PLs and warehouse-heavy distributors."
+      },
+      {
+        "channel": "linkedin",
+        "how_to_reach": "Founder-led LinkedIn outreach to VP Operations and logistics leaders",
+        "lead_source": "LinkedIn Sales Navigator title and company filters",
+        "expected_response_rate": 0.06,
+        "volume_estimate": 30,
+        "message_angle": "Show how the sidecar workflow cuts customer escalations",
+        "first_20_plan": "Follow email with ten warm-looking LinkedIn prospects and use the escalation metric angle."
+      }
+    ],
+    "total_reachable_leads": 70,
+    "estimated_cost_per_conversation": 4.2,
+    "verdict": "reachable",
+    "verdict_rationale": "Two channels and a clear buyer map make the wedge reachable."
+  },
+  "gate_history": [
+    {
+      "candidate_id": "cand_logistics_ops",
+      "stage": "landscape_scoring_skeptic",
+      "action": "investigate",
+      "reason": "Borderline candidate should run a targeted evidence pass.",
+      "iteration": 0,
+      "metadata": {
+        "budget_mode": "normal"
+      },
+      "timestamp": "2026-03-10T21:44:17.700435"
+    },
+    {
+      "candidate_id": "cand_logistics_ops",
+      "stage": "landscape_scoring_skeptic",
+      "action": "advance",
+      "reason": "Score clears the normal advance threshold.",
+      "iteration": 1,
+      "metadata": {
+        "budget_mode": "normal"
+      },
+      "timestamp": "2026-03-10T21:44:17.713828"
+    },
+    {
+      "candidate_id": "cand_logistics_ops",
+      "stage": "wedge_design",
+      "action": "revise",
+      "reason": "The wedge should be revised using critique feedback.",
+      "iteration": 0,
+      "metadata": {
+        "budget_mode": "normal"
+      },
+      "timestamp": "2026-03-10T21:44:17.718827"
+    },
+    {
+      "candidate_id": "cand_logistics_ops",
+      "stage": "wedge_design",
+      "action": "advance",
+      "reason": "A viable wedge was found.",
+      "iteration": 1,
+      "metadata": {
+        "budget_mode": "normal"
+      },
+      "timestamp": "2026-03-10T21:44:17.723967"
+    },
+    {
+      "candidate_id": "cand_logistics_ops",
+      "stage": "buyer_channel",
+      "action": "retry",
+      "reason": "Marginal reachability gets one retry.",
+      "iteration": 0,
+      "metadata": {
+        "budget_mode": "normal"
+      },
+      "timestamp": "2026-03-10T21:44:17.729571"
+    },
+    {
+      "candidate_id": "cand_logistics_ops",
+      "stage": "buyer_channel",
+      "action": "advance",
+      "reason": "Reachability thresholds are satisfied.",
+      "iteration": 1,
+      "metadata": {
+        "budget_mode": "normal"
+      },
+      "timestamp": "2026-03-10T21:44:17.733190"
+    }
+  ],
+  "caution_flags": [],
+  "generated_at": "2026-03-10T21:44:17.734457Z"
+}

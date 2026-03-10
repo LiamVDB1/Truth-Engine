@@ -89,11 +89,15 @@ Recommended setup:
 
 ## 7. Gate Thresholds: Reframed
 
-**Gate A is a market reachability test, not a daily throughput target.**
+**Implementation note:** the workflow document is canonical for gate sequencing. For implementation:
 
-The question Gate A answers: "Does a viable, reachable market exist for this candidate?"
+- Gate A = Stage 3 research viability gate
+- Gate B = Stage 5 reachability gate
+- Gate C = commitment threshold gate
 
-Revised Gate A (V1):
+The reachability thresholds below therefore define the practical Gate B standard for v0.1.
+
+Revised reachability standard (implemented as Gate B in v0.1):
 - ≥ 50 identifiable leads in the target ICP (exist, not contacted)
 - ≥ 2 distinct channels where ICP is reachable
 - Clear user/buyer distinction
@@ -101,7 +105,7 @@ Revised Gate A (V1):
 
 These are "does the market exist" thresholds, not "can you email 50 people tomorrow."
 
-Gate B and Gate C thresholds stay as defined in the constitution, evaluated during real runs.
+Gate A and Gate C behavior stay as defined in `truth_engine_v1_agent_workflow.md`.
 
 ---
 
@@ -117,7 +121,9 @@ Gate B and Gate C thresholds stay as defined in the constitution, evaluated duri
 
 ## Budget: €5/Candidate Target
 
-**Revised budget split:**
+**Implementation note:** the canonical per-stage budget table now lives in `docs/implementation_contract.md` and the workflow budget-control section. The grouped buckets below are only a high-level allocation envelope.
+
+**High-level budget split:**
 
 | Stages | Budget |
 |--------|--------|

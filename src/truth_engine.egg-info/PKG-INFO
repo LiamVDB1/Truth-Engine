@@ -1,0 +1,117 @@
+Metadata-Version: 2.4
+Name: truth-engine
+Version: 0.1.0
+Summary: Truth Engine V1 implementation scaffold
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: alembic<2,>=1.16
+Requires-Dist: httpx<0.29,>=0.28
+Requires-Dist: litellm<2,>=1.81.13
+Requires-Dist: pydantic<3,>=2.11
+Requires-Dist: pydantic-settings<3,>=2.10
+Requires-Dist: praw<8,>=7.8
+Requires-Dist: psycopg[binary]<4,>=3.2
+Requires-Dist: sqlalchemy<3,>=2.0
+Requires-Dist: trafilatura<3,>=2.0
+Provides-Extra: dev
+Requires-Dist: mypy<2,>=1.18; extra == "dev"
+Requires-Dist: pytest<9,>=8.4; extra == "dev"
+Requires-Dist: pytest-cov<8,>=7.0; extra == "dev"
+Requires-Dist: ruff<0.14,>=0.13; extra == "dev"
+
+# Truth Engine
+
+Truth Engine V1 is a deterministic, evidence-backed business validation engine.
+
+The current repository implements the frozen v0.1 boundary:
+
+- stages `0-5`
+- product boundary at `Gate B`
+- output as an operator-ready Markdown/JSON dossier
+- no autonomous outbound or conversation automation
+
+The current runtime is fixture-backed and repository-backed. It is designed to prove the full
+candidate workflow, persistence model, gate logic, dossier generation, and audit trail before
+turning on live provider adapters.
+
+## What Works
+
+- deterministic single-candidate workflow through Gate B
+- bounded Gate A targeted-evidence loop
+- bounded wedge refinement loop
+- Gate B retry / kill logic
+- repository-backed storage for arenas, signals, problem units, landscape entries, wedges,
+  channel plans, decisions, and cost logs
+- tool runtime enforcement for the v0.1 agent-visible tool surface
+- prompt hash and prompt version capture on stage runs
+- Alembic migration scaffold for the initial schema
+- CLI commands for schema init, fixture execution, and dossier export
+
+## Quickstart
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+```
+
+Initialize a local database:
+
+```bash
+python -m truth_engine init-db --database-url sqlite:///./truth_engine.db
+```
+
+Run the full Gate B workflow on the primary happy-path fixture:
+
+```bash
+python -m truth_engine run-fixture \
+  --fixture tests/fixtures/workflows/investigate_revise_reachable.json \
+  --database-url sqlite:///./truth_engine.db \
+  --output-dir ./out \
+  --prompt-version v0
+```
+
+Export a previously stored dossier:
+
+```bash
+python -m truth_engine export-dossier \
+  --candidate-id cand_logistics_ops \
+  --database-url sqlite:///./truth_engine.db \
+  --output-dir ./out
+```
+
+Run the migration directly with Alembic:
+
+```bash
+TRUTH_ENGINE_DATABASE_URL=sqlite:///./truth_engine.db alembic upgrade head
+```
+
+## Fixture Scenarios
+
+- `tests/fixtures/workflows/investigate_revise_reachable.json`
+  - Gate A investigate pass
+  - wedge revision
+  - Gate B retry
+  - final advance with dossier
+- `tests/fixtures/workflows/gate_b_retry_kill.json`
+  - Gate B retry followed by kill
+- `tests/fixtures/workflows/budget_degrade_gate_b_kill.json`
+  - over-target degrade mode disables the optional Gate B retry
+
+## Verification
+
+```bash
+ruff format .
+ruff check .
+mypy .
+pytest -q
+```
+
+## Source Of Truth
+
+Implementation is constrained by:
+
+1. `truth_engine_v1_agent_workflow.md`
+2. `docs/implementation_contract.md`
+3. `docs/resolved_decisions.md`
+4. `docs/stack_decisions.md`

@@ -1,0 +1,815 @@
+{
+  "candidate_id": "cand_logistics_ops",
+  "arena_discovery": {
+    "scout_metrics": {
+      "cost_eur": 0.04,
+      "input_tokens": 120,
+      "output_tokens": 80,
+      "tool_calls": 4
+    },
+    "evaluator_metrics": {
+      "cost_eur": 0.06,
+      "input_tokens": 90,
+      "output_tokens": 70,
+      "tool_calls": 0
+    },
+    "search_result": {
+      "sources_searched": [
+        "job_postings",
+        "reddit"
+      ],
+      "search_summary": "Hiring growth and recurring complaints both point to logistics operations friction."
+    },
+    "raw_arenas": [
+      {
+        "id": "arena_logistics",
+        "domain": "Logistics operations",
+        "icp_user_role": "Operations Manager",
+        "icp_buyer_role": "VP Operations",
+        "geo": "EU + US",
+        "channel_surface": [
+          "email",
+          "linkedin",
+          "reddit"
+        ],
+        "solution_modality": "saas",
+        "market_signals": [
+          "500+ coordinator job postings mention spreadsheet-heavy workflows",
+          "Reddit threads complain about shipment update chaos"
+        ],
+        "signal_sources": [
+          "https://example.com/jobs/logistics",
+          "https://reddit.com/r/logistics/comments/test"
+        ],
+        "market_size_signal": "500+ active ops roles plus paid incumbent tools",
+        "expected_sales_cycle": "2-4 weeks",
+        "rationale": "The space shows visible pain, identifiable buyers, and software-first workarounds."
+      },
+      {
+        "id": "arena_field_service",
+        "domain": "Field service coordination",
+        "icp_user_role": "Dispatch Lead",
+        "icp_buyer_role": "Director of Service Operations",
+        "geo": "EU + US",
+        "channel_surface": [
+          "email",
+          "linkedin"
+        ],
+        "solution_modality": "saas",
+        "market_signals": [
+          "Growing dispatch headcount"
+        ],
+        "signal_sources": [
+          "https://example.com/jobs/dispatch"
+        ],
+        "market_size_signal": "Strong but slightly narrower hiring signal",
+        "expected_sales_cycle": "3-5 weeks",
+        "rationale": "Interesting pain, but weaker public evidence than logistics operations."
+      }
+    ],
+    "evaluation": {
+      "ranked_arenas": [
+        {
+          "arena": {
+            "id": "arena_logistics",
+            "domain": "Logistics operations",
+            "icp_user_role": "Operations Manager",
+            "icp_buyer_role": "VP Operations",
+            "geo": "EU + US",
+            "channel_surface": [
+              "email",
+              "linkedin",
+              "reddit"
+            ],
+            "solution_modality": "saas",
+            "market_signals": [
+              "500+ coordinator job postings mention spreadsheet-heavy workflows",
+              "Reddit threads complain about shipment update chaos"
+            ],
+            "signal_sources": [
+              "https://example.com/jobs/logistics",
+              "https://reddit.com/r/logistics/comments/test"
+            ],
+            "market_size_signal": "500+ active ops roles plus paid incumbent tools",
+            "expected_sales_cycle": "2-4 weeks",
+            "rationale": "The space shows visible pain, identifiable buyers, and software-first workarounds."
+          },
+          "score": 74,
+          "dimension_scores": {
+            "pain_signal_visibility": 16,
+            "market_size_signal": 18,
+            "icp_reachability": 15,
+            "spend_indicators": 10,
+            "competition_landscape": 7,
+            "founder_constraint_fit": 8
+          },
+          "dimension_rationale": {
+            "pain_signal_visibility": "Pain is visible in both jobs data and complaint threads.",
+            "market_size_signal": "The arena is large enough to support software spend."
+          },
+          "viability_verdict": "viable",
+          "risks": [
+            "Competitive space needs sharper differentiation"
+          ],
+          "recommended_first_sources": [
+            "reddit",
+            "job_postings",
+            "web"
+          ]
+        },
+        {
+          "arena": {
+            "id": "arena_field_service",
+            "domain": "Field service coordination",
+            "icp_user_role": "Dispatch Lead",
+            "icp_buyer_role": "Director of Service Operations",
+            "geo": "EU + US",
+            "channel_surface": [
+              "email",
+              "linkedin"
+            ],
+            "solution_modality": "saas",
+            "market_signals": [
+              "Growing dispatch headcount"
+            ],
+            "signal_sources": [
+              "https://example.com/jobs/dispatch"
+            ],
+            "market_size_signal": "Strong but slightly narrower hiring signal",
+            "expected_sales_cycle": "3-5 weeks",
+            "rationale": "Interesting pain, but weaker public evidence than logistics operations."
+          },
+          "score": 58,
+          "dimension_scores": {
+            "pain_signal_visibility": 11
+          },
+          "dimension_rationale": {
+            "pain_signal_visibility": "Visible but less convergent than the top arena."
+          },
+          "viability_verdict": "marginal",
+          "risks": [
+            "Less obvious software budget"
+          ],
+          "recommended_first_sources": [
+            "job_postings"
+          ]
+        }
+      ],
+      "evaluation_summary": "Logistics operations is the strongest v0.1 arena to pursue."
+    }
+  },
+  "signal_mining_runs": [
+    {
+      "targeted_weakness": null,
+      "metrics": {
+        "cost_eur": 0.2,
+        "input_tokens": 220,
+        "output_tokens": 150,
+        "tool_calls": 6
+      },
+      "result": {
+        "sources_searched": 3,
+        "search_summary": "Initial pass surfaced pain around shipment update coordination."
+      },
+      "raw_signals": [
+        {
+          "id": "sig_1",
+          "source_type": "reddit",
+          "source_url": "https://reddit.com/r/logistics/comments/abc/?utm_source=test",
+          "verbatim_quote": "We still push shipment exceptions around in spreadsheets every day.",
+          "persona": "Operations manager",
+          "inferred_pain": "Shipment exceptions are coordinated manually.",
+          "inferred_frequency": "daily",
+          "proof_of_spend": false,
+          "switching_signal": true,
+          "tags": [
+            "shipment_updates",
+            "spreadsheets"
+          ],
+          "reliability_score": 0.4
+        },
+        {
+          "id": "sig_2",
+          "source_type": "job_post",
+          "source_url": "https://example.com/jobs/logistics-manager",
+          "verbatim_quote": "Own inbound exception management across carrier, warehouse, and customer teams.",
+          "persona": "Hiring manager",
+          "inferred_pain": "Companies hire people to coordinate exceptions manually.",
+          "inferred_frequency": "daily",
+          "proof_of_spend": true,
+          "switching_signal": false,
+          "tags": [
+            "exception_management",
+            "headcount"
+          ],
+          "reliability_score": 0.5
+        },
+        {
+          "id": "sig_3",
+          "source_type": "web",
+          "source_url": "https://example.com/blog/shipment-updates",
+          "verbatim_quote": "Customers escalate when update windows slip and nobody knows the source of delay.",
+          "persona": "Operations consultant",
+          "inferred_pain": "Exception visibility gaps create customer escalations.",
+          "inferred_frequency": "daily",
+          "proof_of_spend": false,
+          "switching_signal": true,
+          "tags": [
+            "customer_escalations",
+            "visibility"
+          ],
+          "reliability_score": 0.4
+        }
+      ]
+    },
+    {
+      "targeted_weakness": "proof_of_spend",
+      "metrics": {
+        "cost_eur": 0.09,
+        "input_tokens": 120,
+        "output_tokens": 80,
+        "tool_calls": 3
+      },
+      "result": {
+        "sources_searched": 2,
+        "search_summary": "Targeted pass found explicit budget signals and incumbent spend."
+      },
+      "raw_signals": [
+        {
+          "id": "sig_4",
+          "source_type": "job_post",
+          "source_url": "https://example.com/jobs/revops-automation",
+          "verbatim_quote": "Experience with paid TMS and workflow automation tooling required.",
+          "persona": "VP Operations",
+          "inferred_pain": "Teams already budget for logistics workflow tooling.",
+          "inferred_frequency": "daily",
+          "proof_of_spend": true,
+          "switching_signal": false,
+          "tags": [
+            "paid_tools",
+            "budget"
+          ],
+          "reliability_score": 0.5
+        },
+        {
+          "id": "sig_5",
+          "source_type": "web",
+          "source_url": "https://example.com/tms/pricing",
+          "verbatim_quote": "Mid-market TMS buyers typically pay for exception dashboards and carrier integrations.",
+          "persona": "Vendor pricing page",
+          "inferred_pain": "Exception management already has budget and pricing anchors.",
+          "inferred_frequency": "monthly",
+          "proof_of_spend": true,
+          "switching_signal": true,
+          "tags": [
+            "pricing",
+            "paid_tools"
+          ],
+          "reliability_score": 0.45
+        }
+      ]
+    }
+  ],
+  "normalization_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.08,
+        "input_tokens": 150,
+        "output_tokens": 100,
+        "tool_calls": 0
+      },
+      "result": {
+        "problem_units": [
+          {
+            "id": "pu_logistics_updates",
+            "job_to_be_done": "Coordinate shipment exception updates across carrier, warehouse, and customer teams",
+            "trigger_event": "A shipment misses its planned handoff or ETA",
+            "frequency": "daily",
+            "severity": 8,
+            "urgency": "Customers escalate quickly when updates are late",
+            "cost_of_failure": "Lost time, angry customers, and avoidable credits",
+            "current_workaround": "Spreadsheets, Slack, and manual follow-up",
+            "proof_of_spend": "Some headcount spend is visible but tooling spend is still thin",
+            "switching_friction": 5,
+            "buyer_authority": "VP Operations",
+            "evidence_ids": [
+              "sig_1",
+              "sig_2",
+              "sig_3"
+            ],
+            "signal_count": 3,
+            "source_diversity": 3,
+            "confidence": 0.35
+          }
+        ],
+        "unclustered_signals": 0,
+        "clustering_summary": "The evidence converges on one clear coordination problem."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.05,
+        "input_tokens": 90,
+        "output_tokens": 70,
+        "tool_calls": 0
+      },
+      "result": {
+        "problem_units": [
+          {
+            "id": "pu_logistics_updates",
+            "job_to_be_done": "Coordinate shipment exception updates across carrier, warehouse, and customer teams",
+            "trigger_event": "A shipment misses its planned handoff or ETA",
+            "frequency": "daily",
+            "severity": 8,
+            "urgency": "Customers escalate quickly when updates are late",
+            "cost_of_failure": "Lost time, angry customers, and avoidable credits",
+            "current_workaround": "Spreadsheets, Slack, and manual follow-up",
+            "proof_of_spend": "Headcount and paid logistics tooling both show established spend",
+            "switching_friction": 5,
+            "buyer_authority": "VP Operations",
+            "evidence_ids": [
+              "sig_1",
+              "sig_2",
+              "sig_3",
+              "sig_4",
+              "sig_5"
+            ],
+            "signal_count": 5,
+            "source_diversity": 3,
+            "confidence": 0.45
+          }
+        ],
+        "unclustered_signals": 0,
+        "clustering_summary": "Targeted evidence strengthened spend confidence for the same problem unit."
+      }
+    }
+  ],
+  "landscape_research": {
+    "metrics": {
+      "cost_eur": 0.1,
+      "input_tokens": 110,
+      "output_tokens": 80,
+      "tool_calls": 4
+    },
+    "result": {
+      "sources_searched": 4,
+      "search_summary": "The space is established but not closed.",
+      "active_competitor_count": 3,
+      "dead_attempt_count": 1,
+      "open_source_count": 1,
+      "market_density": "established"
+    },
+    "entries": [
+      {
+        "id": "land_1",
+        "name": "RoutePilot",
+        "type": "active_competitor",
+        "status": "active",
+        "source_url": "https://example.com/routepilot",
+        "what_they_do": "Offer general logistics visibility tooling.",
+        "relevance": "partial_overlap",
+        "strengths": [
+          "Carrier integrations"
+        ],
+        "weaknesses": [
+          "Heavy implementation",
+          "Weak exception workflows"
+        ],
+        "pricing": "$1,500/mo",
+        "failure_reason": null,
+        "years_active": "2020-present",
+        "funding_raised": "$8M seed",
+        "lesson_for_us": "A narrow wedge focused on exception coordination can differentiate."
+      },
+      {
+        "id": "land_2",
+        "name": "OpsMailer",
+        "type": "dead_attempt",
+        "status": "shut_down",
+        "source_url": "https://example.com/postmortem",
+        "what_they_do": "Tried to automate carrier update emails.",
+        "relevance": "direct_competitor",
+        "strengths": null,
+        "weaknesses": null,
+        "pricing": null,
+        "failure_reason": "Too horizontal and not tied to a workflow owner",
+        "years_active": "2019-2022",
+        "funding_raised": null,
+        "lesson_for_us": "Own the workflow and measurable SLA improvement, not generic notifications."
+      }
+    ]
+  },
+  "scoring_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.08,
+        "input_tokens": 120,
+        "output_tokens": 90,
+        "tool_calls": 0
+      },
+      "result": {
+        "scored_candidates": [
+          {
+            "problem_unit_id": "pu_logistics_updates",
+            "total_score": 58,
+            "confidence": 0.48,
+            "confidence_rationale": "Pain is clear, but spend evidence needs strengthening.",
+            "dimension_scores": {
+              "pain_severity": 12,
+              "pain_frequency": 9,
+              "urgency": 7,
+              "proof_of_spend": 9,
+              "evidence_strength": 8,
+              "buyer_authority_clarity": 7,
+              "founder_advantage": 7,
+              "switching_friction": -4,
+              "crowdedness": -2
+            },
+            "dimension_evidence": {
+              "proof_of_spend": "Headcount is clear, but direct tooling budget is sparse."
+            },
+            "dimension_rationale": {
+              "pain_severity": "Failure creates real customer-facing disruption.",
+              "proof_of_spend": "Evidence is still mixed on software budget."
+            },
+            "weakest_dimensions": [
+              "proof_of_spend",
+              "buyer_authority_clarity"
+            ]
+          }
+        ],
+        "top_candidate": {
+          "problem_unit_id": "pu_logistics_updates",
+          "total_score": 58,
+          "confidence": 0.48,
+          "confidence_rationale": "Pain is clear, but spend evidence needs strengthening.",
+          "dimension_scores": {
+            "pain_severity": 12,
+            "pain_frequency": 9,
+            "urgency": 7,
+            "proof_of_spend": 9,
+            "evidence_strength": 8,
+            "buyer_authority_clarity": 7,
+            "founder_advantage": 7,
+            "switching_friction": -4,
+            "crowdedness": -2
+          },
+          "dimension_evidence": {
+            "proof_of_spend": "Headcount is clear, but direct tooling budget is sparse."
+          },
+          "dimension_rationale": {
+            "pain_severity": "Failure creates real customer-facing disruption.",
+            "proof_of_spend": "Evidence is still mixed on software budget."
+          },
+          "weakest_dimensions": [
+            "proof_of_spend",
+            "buyer_authority_clarity"
+          ]
+        },
+        "scoring_summary": "Strong pain, but the spend signal needs a targeted pass."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.09,
+        "input_tokens": 130,
+        "output_tokens": 95,
+        "tool_calls": 0
+      },
+      "result": {
+        "scored_candidates": [
+          {
+            "problem_unit_id": "pu_logistics_updates",
+            "total_score": 72,
+            "confidence": 0.61,
+            "confidence_rationale": "Spend signals now support a viable wedge test.",
+            "dimension_scores": {
+              "pain_severity": 12,
+              "pain_frequency": 9,
+              "urgency": 7,
+              "proof_of_spend": 15,
+              "evidence_strength": 10,
+              "buyer_authority_clarity": 8,
+              "founder_advantage": 7,
+              "switching_friction": -4,
+              "crowdedness": -2
+            },
+            "dimension_evidence": {
+              "proof_of_spend": "Both job postings and pricing pages show established tooling budget."
+            },
+            "dimension_rationale": {
+              "proof_of_spend": "The targeted pass closed the main evidence gap."
+            },
+            "weakest_dimensions": [
+              "switching_friction",
+              "crowdedness"
+            ]
+          }
+        ],
+        "top_candidate": {
+          "problem_unit_id": "pu_logistics_updates",
+          "total_score": 72,
+          "confidence": 0.61,
+          "confidence_rationale": "Spend signals now support a viable wedge test.",
+          "dimension_scores": {
+            "pain_severity": 12,
+            "pain_frequency": 9,
+            "urgency": 7,
+            "proof_of_spend": 15,
+            "evidence_strength": 10,
+            "buyer_authority_clarity": 8,
+            "founder_advantage": 7,
+            "switching_friction": -4,
+            "crowdedness": -2
+          },
+          "dimension_evidence": {
+            "proof_of_spend": "Both job postings and pricing pages show established tooling budget."
+          },
+          "dimension_rationale": {
+            "proof_of_spend": "The targeted pass closed the main evidence gap."
+          },
+          "weakest_dimensions": [
+            "switching_friction",
+            "crowdedness"
+          ]
+        },
+        "scoring_summary": "The candidate now clears Gate A."
+      }
+    }
+  ],
+  "skeptic_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.12,
+        "input_tokens": 160,
+        "output_tokens": 110,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_logistics_ops",
+        "evidence_integrity": "some_gaps",
+        "risk_flags": [
+          "Direct budget evidence is still thin."
+        ],
+        "missing_evidence": [
+          "Find pricing or job-posting evidence that this workflow already has paid tooling."
+        ],
+        "disconfirming_signals": [],
+        "landscape_assessment": "contested",
+        "landscape_detail": "Incumbents exist, but most are broad platforms with heavy implementation.",
+        "inflated_dimensions": [
+          "proof_of_spend"
+        ],
+        "primary_weakness": "proof_of_spend",
+        "overall_risk": "medium",
+        "recommendation": "investigate",
+        "recommendation_rationale": "The wedge should not move forward until spend evidence is clearer."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.12,
+        "input_tokens": 170,
+        "output_tokens": 120,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_logistics_ops",
+        "evidence_integrity": "solid",
+        "risk_flags": [
+          "Switching friction will need onboarding support."
+        ],
+        "missing_evidence": [],
+        "disconfirming_signals": [],
+        "landscape_assessment": "contested",
+        "landscape_detail": "The market is active, but the problem is still underserved in the exception workflow layer.",
+        "inflated_dimensions": [],
+        "primary_weakness": "switching_friction",
+        "overall_risk": "medium",
+        "recommendation": "advance",
+        "recommendation_rationale": "The candidate is now strong enough to design a wedge."
+      }
+    }
+  ],
+  "wedge_design_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.1,
+        "input_tokens": 130,
+        "output_tokens": 120,
+        "tool_calls": 0
+      },
+      "result": {
+        "wedges": [
+          {
+            "id": "wedge_1",
+            "wedge_promise": "We automate shipment exception updates so ops teams stop losing hours to spreadsheet follow-up.",
+            "solution_type": "saas",
+            "key_capability": "Monitors shipment exceptions, assigns owners, and generates update workflows.",
+            "target_outcome": "Cut exception update handling time by 50 percent.",
+            "differentiation": "Focused on the exception workflow rather than broad TMS replacement.",
+            "rough_pricing": "€499/mo per ops team",
+            "delivery_complexity": "medium",
+            "mvp_scope": "Carrier and warehouse update orchestration for exception events only.",
+            "first_10_onboarding": "Import active shipments and connect one carrier feed.",
+            "switching_ease": "Runs beside existing TMS without replacing it.",
+            "data_advantage": "Builds a dataset on exception timing and response workflows."
+          },
+          {
+            "id": "wedge_2",
+            "wedge_promise": "We summarize shipment delays into weekly reports for ops leaders.",
+            "solution_type": "saas",
+            "key_capability": "Aggregates exception activity into management reports.",
+            "target_outcome": "Give managers cleaner reporting.",
+            "differentiation": "Faster reporting than spreadsheets.",
+            "rough_pricing": "€199/mo",
+            "delivery_complexity": "low",
+            "mvp_scope": "Weekly reporting only.",
+            "first_10_onboarding": "Upload CSV exports once per week.",
+            "switching_ease": "No integrations needed.",
+            "data_advantage": "Low data moat."
+          }
+        ],
+        "design_rationale": "The best wedge focuses on urgent exception handling, not passive reporting."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.08,
+        "input_tokens": 110,
+        "output_tokens": 95,
+        "tool_calls": 0
+      },
+      "result": {
+        "wedges": [
+          {
+            "id": "wedge_1b",
+            "wedge_promise": "We automate shipment exception triage so ops teams deliver faster customer updates without replacing their TMS.",
+            "solution_type": "saas",
+            "key_capability": "Pulls exception events from existing systems, assigns next actions, and drafts customer-facing updates.",
+            "target_outcome": "Reduce update lag and customer escalations within 30 days.",
+            "differentiation": "Adds a focused workflow layer on top of incumbent systems instead of competing as a full platform.",
+            "rough_pricing": "€750/mo per ops pod",
+            "delivery_complexity": "medium",
+            "mvp_scope": "Exception intake, triage, and outbound update workflow for one warehouse operation.",
+            "first_10_onboarding": "Connect one existing TMS feed and map one escalation workflow.",
+            "switching_ease": "Sidecar rollout with one team before expansion.",
+            "data_advantage": "Captures structured exception-response timing and outcomes."
+          }
+        ],
+        "design_rationale": "The revision tightens the promise around customer updates and sidecar rollout."
+      }
+    }
+  ],
+  "wedge_critique_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.12,
+        "input_tokens": 150,
+        "output_tokens": 120,
+        "tool_calls": 0
+      },
+      "result": {
+        "evaluations": [
+          {
+            "wedge_index": 0,
+            "promise_alignment": "strong",
+            "feasibility": "feasible",
+            "differentiation_strength": "moderate",
+            "pricing_viability": "viable",
+            "switching_ease": "moderate",
+            "competitive_risk": "medium",
+            "verdict": "needs_work",
+            "key_issues": [
+              "The sidecar positioning needs to be clearer."
+            ]
+          },
+          {
+            "wedge_index": 1,
+            "promise_alignment": "partial",
+            "feasibility": "feasible",
+            "differentiation_strength": "weak",
+            "pricing_viability": "uncertain",
+            "switching_ease": "easy",
+            "competitive_risk": "high",
+            "verdict": "weak",
+            "key_issues": [
+              "Weekly reporting is too far from the urgent pain."
+            ]
+          }
+        ],
+        "best_wedge_index": 0,
+        "revision_suggestions": [
+          "State explicitly that the wedge layers on top of incumbent systems.",
+          "Tie the outcome to customer update speed and escalation reduction."
+        ],
+        "overall_summary": "One wedge is close, but it needs sharper positioning."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.1,
+        "input_tokens": 130,
+        "output_tokens": 100,
+        "tool_calls": 0
+      },
+      "result": {
+        "evaluations": [
+          {
+            "wedge_index": 0,
+            "promise_alignment": "strong",
+            "feasibility": "feasible",
+            "differentiation_strength": "strong",
+            "pricing_viability": "viable",
+            "switching_ease": "easy",
+            "competitive_risk": "medium",
+            "verdict": "viable",
+            "key_issues": [
+              "Need one channel with clear buyer access."
+            ]
+          }
+        ],
+        "best_wedge_index": 0,
+        "revision_suggestions": [],
+        "overall_summary": "The revised wedge is viable and ready for buyer/channel validation."
+      }
+    }
+  ],
+  "channel_validation_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.07,
+        "input_tokens": 90,
+        "output_tokens": 75,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_logistics_ops",
+        "user_role": "Operations Manager",
+        "buyer_role": "VP Operations",
+        "buyer_is_user": false,
+        "blocker_roles": [
+          "IT integrations lead"
+        ],
+        "procurement_notes": "Mid-market buyers can approve sidecar tooling quickly when the rollout is team-scoped.",
+        "channels": [
+          {
+            "channel": "email",
+            "how_to_reach": "Cold email Heads of Ops via Apollo-style logistics lists",
+            "lead_source": "Apollo filtered by warehouse and logistics ops titles",
+            "expected_response_rate": 0.03,
+            "volume_estimate": 35,
+            "message_angle": "Reduce update lag without replacing the TMS",
+            "first_20_plan": "Pull 20 mid-market ops leaders and pitch the sidecar workflow angle."
+          }
+        ],
+        "total_reachable_leads": 35,
+        "estimated_cost_per_conversation": 6.2,
+        "verdict": "marginal",
+        "verdict_rationale": "Email alone is too thin and expensive."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.06,
+        "input_tokens": 95,
+        "output_tokens": 80,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_logistics_ops",
+        "user_role": "Operations Manager",
+        "buyer_role": "VP Operations",
+        "buyer_is_user": false,
+        "blocker_roles": [
+          "IT integrations lead"
+        ],
+        "procurement_notes": "The sidecar rollout and low initial integration burden keep procurement light.",
+        "channels": [
+          {
+            "channel": "email",
+            "how_to_reach": "Cold email Heads of Ops via filtered logistics lists",
+            "lead_source": "Apollo and carrier-partner prospecting lists",
+            "expected_response_rate": 0.04,
+            "volume_estimate": 40,
+            "message_angle": "Reduce shipment update lag without a rip-and-replace project",
+            "first_20_plan": "Start with 20 Heads of Ops across 3PLs and warehouse-heavy distributors."
+          },
+          {
+            "channel": "linkedin",
+            "how_to_reach": "Founder-led LinkedIn outreach to VP Operations and logistics leaders",
+            "lead_source": "LinkedIn Sales Navigator title and company filters",
+            "expected_response_rate": 0.06,
+            "volume_estimate": 30,
+            "message_angle": "Show how the sidecar workflow cuts customer escalations",
+            "first_20_plan": "Follow email with ten warm-looking LinkedIn prospects and use the escalation metric angle."
+          }
+        ],
+        "total_reachable_leads": 70,
+        "estimated_cost_per_conversation": 4.2,
+        "verdict": "reachable",
+        "verdict_rationale": "Two channels and a clear buyer map make the wedge reachable."
+      }
+    }
+  ]
+}

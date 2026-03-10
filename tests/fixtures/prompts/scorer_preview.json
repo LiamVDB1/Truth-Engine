@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cand_logistics_ops",
+  "stage": "landscape_scoring_skeptic",
+  "output_contract": "ScoringResult",
+  "selected_problem_unit_id": "pu_late_shipments",
+  "market_density": "established",
+  "evidence_note": "Multiple recurring complaints about late exception handling and paid workaround behavior."
+}

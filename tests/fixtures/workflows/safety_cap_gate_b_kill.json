@@ -1,0 +1,344 @@
+{
+  "candidate_id": "cand_safety_cap",
+  "arena_discovery": {
+    "scout_metrics": {
+      "cost_eur": 1.0,
+      "input_tokens": 1000,
+      "output_tokens": 600,
+      "tool_calls": 5
+    },
+    "evaluator_metrics": {
+      "cost_eur": 0.8,
+      "input_tokens": 700,
+      "output_tokens": 500,
+      "tool_calls": 0
+    },
+    "search_result": {
+      "sources_searched": [
+        "reddit",
+        "job_postings"
+      ],
+      "search_summary": "A costly but promising arena discovery pass."
+    },
+    "raw_arenas": [
+      {
+        "id": "arena_budget",
+        "domain": "Dispatch exception handling",
+        "icp_user_role": "Dispatch Manager",
+        "icp_buyer_role": "Director of Operations",
+        "geo": "EU + US",
+        "channel_surface": [
+          "email",
+          "linkedin"
+        ],
+        "solution_modality": "saas",
+        "market_signals": [
+          "Job posts and complaints both show manual exception follow-up"
+        ],
+        "signal_sources": [
+          "https://example.com/dispatch"
+        ],
+        "market_size_signal": "Sufficiently large dispatch software category",
+        "expected_sales_cycle": "3-5 weeks",
+        "rationale": "The candidate is viable, but the research run is already expensive."
+      }
+    ],
+    "evaluation": {
+      "ranked_arenas": [
+        {
+          "arena": {
+            "id": "arena_budget",
+            "domain": "Dispatch exception handling",
+            "icp_user_role": "Dispatch Manager",
+            "icp_buyer_role": "Director of Operations",
+            "geo": "EU + US",
+            "channel_surface": [
+              "email",
+              "linkedin"
+            ],
+            "solution_modality": "saas",
+            "market_signals": [
+              "Job posts and complaints both show manual exception follow-up"
+            ],
+            "signal_sources": [
+              "https://example.com/dispatch"
+            ],
+            "market_size_signal": "Sufficiently large dispatch software category",
+            "expected_sales_cycle": "3-5 weeks",
+            "rationale": "The candidate is viable, but the research run is already expensive."
+          },
+          "score": 70,
+          "dimension_scores": {
+            "pain_signal_visibility": 15
+          },
+          "dimension_rationale": {
+            "pain_signal_visibility": "The pain is clear."
+          },
+          "viability_verdict": "viable",
+          "risks": [
+            "Budget discipline"
+          ],
+          "recommended_first_sources": [
+            "reddit",
+            "web"
+          ]
+        }
+      ],
+      "evaluation_summary": "Proceed, but the candidate is already costly."
+    }
+  },
+  "signal_mining_runs": [
+    {
+      "targeted_weakness": null,
+      "metrics": {
+        "cost_eur": 1.6,
+        "input_tokens": 1600,
+        "output_tokens": 900,
+        "tool_calls": 7
+      },
+      "result": {
+        "sources_searched": 3,
+        "search_summary": "Evidence gathering was successful but expensive."
+      },
+      "raw_signals": [
+        {
+          "id": "sig_b1",
+          "source_type": "web",
+          "source_url": "https://example.com/dispatch-exceptions",
+          "verbatim_quote": "Dispatch teams chase exception updates manually across carriers and field crews.",
+          "persona": "Operations consultant",
+          "inferred_pain": "Dispatch exception handling is manual.",
+          "inferred_frequency": "daily",
+          "proof_of_spend": true,
+          "switching_signal": true,
+          "tags": [
+            "dispatch",
+            "exceptions"
+          ],
+          "reliability_score": 0.4
+        }
+      ]
+    }
+  ],
+  "normalization_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.9,
+        "input_tokens": 900,
+        "output_tokens": 600,
+        "tool_calls": 0
+      },
+      "result": {
+        "problem_units": [
+          {
+            "id": "pu_budget_dispatch",
+            "job_to_be_done": "Coordinate dispatch exception responses across carriers and field crews",
+            "trigger_event": "A route exception occurs",
+            "frequency": "daily",
+            "severity": 8,
+            "urgency": "Every late exception drives missed SLAs",
+            "cost_of_failure": "Operational disruption and customer dissatisfaction",
+            "current_workaround": "Manual calls, spreadsheets, and Slack",
+            "proof_of_spend": "Teams buy dispatch tooling and spend heavily on operations headcount",
+            "switching_friction": 6,
+            "buyer_authority": "Director of Operations",
+            "evidence_ids": [
+              "sig_b1"
+            ],
+            "signal_count": 1,
+            "source_diversity": 1,
+            "confidence": 0.2
+          }
+        ],
+        "unclustered_signals": 0,
+        "clustering_summary": "One dispatch-exception problem unit."
+      }
+    }
+  ],
+  "landscape_research": {
+    "metrics": {
+      "cost_eur": 0.7,
+      "input_tokens": 700,
+      "output_tokens": 450,
+      "tool_calls": 3
+    },
+    "result": {
+      "sources_searched": 4,
+      "search_summary": "The market is workable but this candidate is getting expensive.",
+      "active_competitor_count": 2,
+      "dead_attempt_count": 0,
+      "open_source_count": 0,
+      "market_density": "established"
+    },
+    "entries": []
+  },
+  "scoring_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.6,
+        "input_tokens": 600,
+        "output_tokens": 420,
+        "tool_calls": 0
+      },
+      "result": {
+        "scored_candidates": [
+          {
+            "problem_unit_id": "pu_budget_dispatch",
+            "total_score": 73,
+            "confidence": 0.55,
+            "confidence_rationale": "The candidate is viable enough to proceed.",
+            "dimension_scores": {
+              "pain_severity": 12
+            },
+            "dimension_evidence": {
+              "pain_severity": "Dispatch exception pain is critical."
+            },
+            "dimension_rationale": {
+              "pain_severity": "Pain is strong."
+            },
+            "weakest_dimensions": [
+              "switching_friction"
+            ]
+          }
+        ],
+        "top_candidate": {
+          "problem_unit_id": "pu_budget_dispatch",
+          "total_score": 73,
+          "confidence": 0.55,
+          "confidence_rationale": "The candidate is viable enough to proceed.",
+          "dimension_scores": {
+            "pain_severity": 12
+          },
+          "dimension_evidence": {
+            "pain_severity": "Dispatch exception pain is critical."
+          },
+          "dimension_rationale": {
+            "pain_severity": "Pain is strong."
+          },
+          "weakest_dimensions": [
+            "switching_friction"
+          ]
+        },
+        "scoring_summary": "The candidate clears Gate A."
+      }
+    }
+  ],
+  "skeptic_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.7,
+        "input_tokens": 700,
+        "output_tokens": 500,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_budget_pressure",
+        "evidence_integrity": "solid",
+        "risk_flags": [
+          "Switching friction"
+        ],
+        "missing_evidence": [],
+        "disconfirming_signals": [],
+        "landscape_assessment": "contested",
+        "landscape_detail": "The wedge needs care but is worth testing.",
+        "inflated_dimensions": [],
+        "primary_weakness": "switching_friction",
+        "overall_risk": "medium",
+        "recommendation": "advance",
+        "recommendation_rationale": "Proceed, but the budget is already in degrade mode."
+      }
+    }
+  ],
+  "wedge_design_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.4,
+        "input_tokens": 400,
+        "output_tokens": 260,
+        "tool_calls": 0
+      },
+      "result": {
+        "wedges": [
+          {
+            "id": "wedge_b1",
+            "wedge_promise": "We automate dispatch exception triage so ops teams recover routes faster.",
+            "solution_type": "saas",
+            "key_capability": "Collects exception data and routes next actions.",
+            "target_outcome": "Reduce exception recovery time.",
+            "differentiation": "Sidecar workflow layer.",
+            "rough_pricing": "€699/mo",
+            "delivery_complexity": "medium",
+            "mvp_scope": "Dispatch exception triage only",
+            "first_10_onboarding": "Connect one dispatch feed",
+            "switching_ease": "Sidecar rollout",
+            "data_advantage": "Dispatch resolution timing dataset"
+          }
+        ],
+        "design_rationale": "A single viable wedge."
+      }
+    }
+  ],
+  "wedge_critique_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.3,
+        "input_tokens": 300,
+        "output_tokens": 220,
+        "tool_calls": 0
+      },
+      "result": {
+        "evaluations": [
+          {
+            "wedge_index": 0,
+            "promise_alignment": "strong",
+            "feasibility": "feasible",
+            "differentiation_strength": "moderate",
+            "pricing_viability": "viable",
+            "switching_ease": "moderate",
+            "competitive_risk": "medium",
+            "verdict": "viable",
+            "key_issues": []
+          }
+        ],
+        "best_wedge_index": 0,
+        "revision_suggestions": [],
+        "overall_summary": "The wedge is viable."
+      }
+    }
+  ],
+  "channel_validation_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.2,
+        "input_tokens": 200,
+        "output_tokens": 160,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_budget_pressure",
+        "user_role": "Dispatch Manager",
+        "buyer_role": "Director of Operations",
+        "buyer_is_user": false,
+        "blocker_roles": [
+          "IT operations"
+        ],
+        "procurement_notes": "The wedge is reachable in theory, but this candidate is already over target budget.",
+        "channels": [
+          {
+            "channel": "email",
+            "how_to_reach": "Cold email dispatch leaders",
+            "lead_source": "Ops lead lists",
+            "expected_response_rate": 0.03,
+            "volume_estimate": 22,
+            "message_angle": "Recover routes faster with exception triage",
+            "first_20_plan": "Email 20 dispatch leaders."
+          }
+        ],
+        "total_reachable_leads": 22,
+        "estimated_cost_per_conversation": 4.2,
+        "verdict": "marginal",
+        "verdict_rationale": "A retry could help, but the candidate is already in degrade mode."
+      }
+    }
+  ]
+}

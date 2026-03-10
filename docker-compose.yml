@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: truth_engine
+      POSTGRES_USER: truth_engine
+      POSTGRES_PASSWORD: truth_engine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  temporal:
+    image: temporalio/auto-setup:1.27
+    environment:
+      DB: sqlite
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+volumes:
+  postgres-data:
+

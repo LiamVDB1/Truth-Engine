@@ -1,0 +1,15 @@
+{
+  "candidate_id": "cand_logistics_ops",
+  "stage": "signal_mining",
+  "output_contract": "SignalMiningResult",
+  "source_targets": [
+    "reddit",
+    "job_postings",
+    "public_web"
+  ],
+  "arena_summary": {
+    "domain": "logistics operations",
+    "icp_user_role": "Head of Operations",
+    "icp_buyer_role": "VP of Operations"
+  }
+}

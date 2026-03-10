@@ -1,0 +1,376 @@
+{
+  "candidate_id": "cand_procurement_ops",
+  "arena_discovery": {
+    "scout_metrics": {
+      "cost_eur": 0.03,
+      "input_tokens": 80,
+      "output_tokens": 60,
+      "tool_calls": 3
+    },
+    "evaluator_metrics": {
+      "cost_eur": 0.05,
+      "input_tokens": 70,
+      "output_tokens": 60,
+      "tool_calls": 0
+    },
+    "search_result": {
+      "sources_searched": [
+        "reddit",
+        "job_postings"
+      ],
+      "search_summary": "Procurement teams complain about vendor follow-up overhead."
+    },
+    "raw_arenas": [
+      {
+        "id": "arena_procurement",
+        "domain": "Procurement operations",
+        "icp_user_role": "Procurement Operations Lead",
+        "icp_buyer_role": "Head of Procurement",
+        "geo": "EU + US",
+        "channel_surface": [
+          "email",
+          "linkedin"
+        ],
+        "solution_modality": "saas",
+        "market_signals": [
+          "Recurring complaints about vendor update chasing"
+        ],
+        "signal_sources": [
+          "https://reddit.com/r/procurement/comments/test"
+        ],
+        "market_size_signal": "Healthy enterprise procurement software spend",
+        "expected_sales_cycle": "4-6 weeks",
+        "rationale": "The pain exists, but buyer access may be narrow."
+      }
+    ],
+    "evaluation": {
+      "ranked_arenas": [
+        {
+          "arena": {
+            "id": "arena_procurement",
+            "domain": "Procurement operations",
+            "icp_user_role": "Procurement Operations Lead",
+            "icp_buyer_role": "Head of Procurement",
+            "geo": "EU + US",
+            "channel_surface": [
+              "email",
+              "linkedin"
+            ],
+            "solution_modality": "saas",
+            "market_signals": [
+              "Recurring complaints about vendor update chasing"
+            ],
+            "signal_sources": [
+              "https://reddit.com/r/procurement/comments/test"
+            ],
+            "market_size_signal": "Healthy enterprise procurement software spend",
+            "expected_sales_cycle": "4-6 weeks",
+            "rationale": "The pain exists, but buyer access may be narrow."
+          },
+          "score": 66,
+          "dimension_scores": {
+            "pain_signal_visibility": 14
+          },
+          "dimension_rationale": {
+            "pain_signal_visibility": "Pain is visible in procurement operations forums."
+          },
+          "viability_verdict": "viable",
+          "risks": [
+            "Buyer access is unclear"
+          ],
+          "recommended_first_sources": [
+            "reddit",
+            "web"
+          ]
+        }
+      ],
+      "evaluation_summary": "Proceed with procurement operations."
+    }
+  },
+  "signal_mining_runs": [
+    {
+      "targeted_weakness": null,
+      "metrics": {
+        "cost_eur": 0.18,
+        "input_tokens": 150,
+        "output_tokens": 120,
+        "tool_calls": 4
+      },
+      "result": {
+        "sources_searched": 2,
+        "search_summary": "Evidence converges around vendor follow-up bottlenecks."
+      },
+      "raw_signals": [
+        {
+          "id": "sig_p1",
+          "source_type": "reddit",
+          "source_url": "https://reddit.com/r/procurement/comments/vendor-followup",
+          "verbatim_quote": "We burn hours chasing supplier updates for every sourcing cycle.",
+          "persona": "Procurement ops lead",
+          "inferred_pain": "Supplier follow-up is manual and time-consuming.",
+          "inferred_frequency": "weekly",
+          "proof_of_spend": true,
+          "switching_signal": true,
+          "tags": [
+            "supplier_updates"
+          ],
+          "reliability_score": 0.4
+        }
+      ]
+    }
+  ],
+  "normalization_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.07,
+        "input_tokens": 80,
+        "output_tokens": 70,
+        "tool_calls": 0
+      },
+      "result": {
+        "problem_units": [
+          {
+            "id": "pu_procurement_followup",
+            "job_to_be_done": "Coordinate supplier updates during sourcing and renewal cycles",
+            "trigger_event": "A sourcing cycle enters vendor follow-up",
+            "frequency": "weekly",
+            "severity": 7,
+            "urgency": "Cycle delays create stakeholder frustration",
+            "cost_of_failure": "Longer sourcing cycles and internal escalation",
+            "current_workaround": "Email chains and spreadsheets",
+            "proof_of_spend": "Teams use paid procurement suites and dedicated ops headcount",
+            "switching_friction": 6,
+            "buyer_authority": "Head of Procurement",
+            "evidence_ids": [
+              "sig_p1"
+            ],
+            "signal_count": 1,
+            "source_diversity": 1,
+            "confidence": 0.2
+          }
+        ],
+        "unclustered_signals": 0,
+        "clustering_summary": "One core follow-up problem unit."
+      }
+    }
+  ],
+  "landscape_research": {
+    "metrics": {
+      "cost_eur": 0.08,
+      "input_tokens": 90,
+      "output_tokens": 70,
+      "tool_calls": 2
+    },
+    "result": {
+      "sources_searched": 3,
+      "search_summary": "Competitive but still differentiated if workflow-specific.",
+      "active_competitor_count": 2,
+      "dead_attempt_count": 0,
+      "open_source_count": 0,
+      "market_density": "emerging"
+    },
+    "entries": []
+  },
+  "scoring_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.08,
+        "input_tokens": 100,
+        "output_tokens": 80,
+        "tool_calls": 0
+      },
+      "result": {
+        "scored_candidates": [
+          {
+            "problem_unit_id": "pu_procurement_followup",
+            "total_score": 71,
+            "confidence": 0.54,
+            "confidence_rationale": "The pain is real and the spend pattern exists.",
+            "dimension_scores": {
+              "pain_severity": 11
+            },
+            "dimension_evidence": {
+              "pain_severity": "Supplier follow-up delays recur during sourcing cycles."
+            },
+            "dimension_rationale": {
+              "pain_severity": "The workflow hurts enough to test a wedge."
+            },
+            "weakest_dimensions": [
+              "buyer_authority_clarity"
+            ]
+          }
+        ],
+        "top_candidate": {
+          "problem_unit_id": "pu_procurement_followup",
+          "total_score": 71,
+          "confidence": 0.54,
+          "confidence_rationale": "The pain is real and the spend pattern exists.",
+          "dimension_scores": {
+            "pain_severity": 11
+          },
+          "dimension_evidence": {
+            "pain_severity": "Supplier follow-up delays recur during sourcing cycles."
+          },
+          "dimension_rationale": {
+            "pain_severity": "The workflow hurts enough to test a wedge."
+          },
+          "weakest_dimensions": [
+            "buyer_authority_clarity"
+          ]
+        },
+        "scoring_summary": "The candidate clears Gate A without investigation."
+      }
+    }
+  ],
+  "skeptic_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.09,
+        "input_tokens": 110,
+        "output_tokens": 90,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_procurement_ops",
+        "evidence_integrity": "solid",
+        "risk_flags": [
+          "Buyer reachability remains the main risk."
+        ],
+        "missing_evidence": [],
+        "disconfirming_signals": [],
+        "landscape_assessment": "contested",
+        "landscape_detail": "Competition exists but the workflow-specific angle is still open.",
+        "inflated_dimensions": [],
+        "primary_weakness": "buyer_authority",
+        "overall_risk": "medium",
+        "recommendation": "advance",
+        "recommendation_rationale": "Proceed to wedge and channel validation."
+      }
+    }
+  ],
+  "wedge_design_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.09,
+        "input_tokens": 100,
+        "output_tokens": 85,
+        "tool_calls": 0
+      },
+      "result": {
+        "wedges": [
+          {
+            "id": "wedge_p1",
+            "wedge_promise": "We automate supplier follow-up orchestration so procurement teams close sourcing cycles faster.",
+            "solution_type": "saas",
+            "key_capability": "Tracks supplier dependencies and automates update requests.",
+            "target_outcome": "Shorten sourcing cycle time.",
+            "differentiation": "Focus on the supplier follow-up workflow only.",
+            "rough_pricing": "€399/mo",
+            "delivery_complexity": "medium",
+            "mvp_scope": "Supplier follow-up tracking and nudges",
+            "first_10_onboarding": "Import current sourcing projects",
+            "switching_ease": "Lives beside the main procurement suite",
+            "data_advantage": "Supplier response timing dataset"
+          }
+        ],
+        "design_rationale": "The wedge is sharp enough to test."
+      }
+    }
+  ],
+  "wedge_critique_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.1,
+        "input_tokens": 110,
+        "output_tokens": 90,
+        "tool_calls": 0
+      },
+      "result": {
+        "evaluations": [
+          {
+            "wedge_index": 0,
+            "promise_alignment": "strong",
+            "feasibility": "feasible",
+            "differentiation_strength": "moderate",
+            "pricing_viability": "viable",
+            "switching_ease": "moderate",
+            "competitive_risk": "medium",
+            "verdict": "viable",
+            "key_issues": []
+          }
+        ],
+        "best_wedge_index": 0,
+        "revision_suggestions": [],
+        "overall_summary": "The wedge is viable."
+      }
+    }
+  ],
+  "channel_validation_runs": [
+    {
+      "metrics": {
+        "cost_eur": 0.06,
+        "input_tokens": 80,
+        "output_tokens": 70,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_procurement_ops",
+        "user_role": "Procurement Operations Lead",
+        "buyer_role": "Head of Procurement",
+        "buyer_is_user": false,
+        "blocker_roles": [
+          "Category managers"
+        ],
+        "procurement_notes": "Outbound access to true buyers is thin.",
+        "channels": [
+          {
+            "channel": "email",
+            "how_to_reach": "Cold email procurement leaders via narrow intent lists",
+            "lead_source": "Procurement title filters",
+            "expected_response_rate": 0.02,
+            "volume_estimate": 28,
+            "message_angle": "Reduce sourcing-cycle delays from supplier follow-up",
+            "first_20_plan": "Test 20 procurement leaders at larger enterprises."
+          }
+        ],
+        "total_reachable_leads": 28,
+        "estimated_cost_per_conversation": 4.8,
+        "verdict": "marginal",
+        "verdict_rationale": "Only one channel looks viable right now."
+      }
+    },
+    {
+      "metrics": {
+        "cost_eur": 0.06,
+        "input_tokens": 85,
+        "output_tokens": 70,
+        "tool_calls": 0
+      },
+      "result": {
+        "candidate_id": "cand_procurement_ops",
+        "user_role": "Procurement Operations Lead",
+        "buyer_role": "Head of Procurement",
+        "buyer_is_user": false,
+        "blocker_roles": [
+          "Category managers"
+        ],
+        "procurement_notes": "Alternative channels still do not open enough buyer access.",
+        "channels": [
+          {
+            "channel": "linkedin",
+            "how_to_reach": "Founder-led LinkedIn messaging to procurement leaders",
+            "lead_source": "LinkedIn search",
+            "expected_response_rate": 0.02,
+            "volume_estimate": 18,
+            "message_angle": "Shorten sourcing cycles by automating supplier follow-up",
+            "first_20_plan": "Test with 20 enterprise procurement leaders."
+          }
+        ],
+        "total_reachable_leads": 18,
+        "estimated_cost_per_conversation": 4.9,
+        "verdict": "marginal",
+        "verdict_rationale": "The retry still fails the channel and volume thresholds."
+      }
+    }
+  ]
+}

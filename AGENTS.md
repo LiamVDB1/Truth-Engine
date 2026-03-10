@@ -3,7 +3,7 @@ Operational guide for coding agents in this repository.
 
 ## 1) Project Snapshot
 - Project: **Truth Engine V1** (autonomous-first business validation engine).
-- Current state: **design-heavy, implementation-light** (mostly docs, minimal code scaffold).
+- Current state: **executable v0.1 core** (docs + Python runtime + fixture-backed Gate B workflow).
 - North-star metric: `time_to_paid_commitment`.
 - Architecture direction: deterministic workflow spine + LLM agents as workers.
 - Cost posture: `EUR 5` target per candidate (soft), degrade above target, safety cap above that.
@@ -11,13 +11,16 @@ Operational guide for coding agents in this repository.
 ## 2) Source-of-Truth Docs (Read First)
 Read in this order before making changes:
 1. `truth_engine_v1_agent_workflow.md`
-2. `docs/resolved_decisions.md`
-3. `docs/arena_definition.md`
-4. `docs/stack_decisions.md`
-5. `docs/outreach_strategy.md`
-6. `docs/scraping_strategy.md`
+2. `docs/implementation_contract.md` if it exists
+3. `docs/resolved_decisions.md`
+4. `docs/arena_definition.md`
+5. `docs/stack_decisions.md`
+6. `docs/outreach_strategy.md`
+7. `docs/scraping_strategy.md`
 
-Conflict rule: `truth_engine_v1_agent_workflow.md` > `docs/resolved_decisions.md` > others.
+Conflict rule:
+- product workflow intent: `truth_engine_v1_agent_workflow.md` > `docs/resolved_decisions.md` > others
+- implementation-specific ambiguities: `docs/implementation_contract.md` > conflicting secondary summaries and budget/tier drift
 
 ## 3) Build / Lint / Test Commands
 Use this command contract when adding or updating code.
@@ -41,7 +44,7 @@ pip install -r requirements-dev.txt
 ```
 
 ### Run / build
-Runtime entrypoint is not finalized yet. Once implemented, expose one canonical command:
+Canonical runtime entrypoint:
 ```bash
 python -m truth_engine
 ```

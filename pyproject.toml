@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "truth-engine"
+version = "0.1.0"
+description = "Truth Engine V1 implementation scaffold"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.16,<2",
+  "httpx>=0.28,<0.29",
+  "litellm>=1.81.13,<2",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "praw>=7.8,<8",
+  "psycopg[binary]>=3.2,<4",
+  "sqlalchemy>=2.0,<3",
+  "trafilatura>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.18,<2",
+  "pytest>=8.4,<9",
+  "pytest-cov>=7.0,<8",
+  "ruff>=0.13,<0.14",
+]
+
+[project.scripts]
+truth-engine = "truth_engine.cli.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"truth_engine.prompts" = ["shared/*.md", "agents/*/*.md"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = ["src"]
+strict = true
+packages = ["truth_engine"]

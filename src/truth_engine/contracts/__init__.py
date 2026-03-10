@@ -1,0 +1,1 @@
+"""Typed contracts package."""
