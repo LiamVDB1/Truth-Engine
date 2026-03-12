@@ -357,6 +357,92 @@ def test_litellm_runner_falls_back_when_response_format_is_rejected() -> None:
     assert "response_format" not in completion.calls[1]
 
 
+def test_litellm_runner_adds_medium_reasoning_effort_for_compatible_models() -> None:
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Reasoning path worked."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 3},
+            }
+        ]
+    )
+
+    runner = LiteLLMAgentRunner(
+        settings=Settings(tier3_model="gpt-5.2"),
+        completion_fn=completion,
+    )
+
+    execution = runner.run(
+        agent=AgentName.SKEPTIC,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=None,
+        tool_executor=None,
+    )
+
+    assert execution.result.search_summary == "Reasoning path worked."
+    assert completion.calls[0]["reasoning_effort"] == "medium"
+    assert "temperature" not in completion.calls[0]
+
+
+def test_litellm_runner_omits_reasoning_effort_for_unknown_models() -> None:
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Non reasoning path worked."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 3},
+            }
+        ]
+    )
+
+    runner = LiteLLMAgentRunner(
+        settings=Settings(tier2_model="kimi-k2.5"),
+        completion_fn=completion,
+    )
+
+    execution = runner.run(
+        agent=AgentName.ARENA_EVALUATOR,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=None,
+        tool_executor=None,
+    )
+
+    assert execution.result.search_summary == "Non reasoning path worked."
+    assert "reasoning_effort" not in completion.calls[0]
+    assert completion.calls[0]["temperature"] == 0.1
+
+
 def test_litellm_runner_prefers_response_cost_before_completion_cost() -> None:
     fake_module = _FakeLiteLLMModule(
         supports_response_schema=False,

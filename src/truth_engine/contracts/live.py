@@ -5,6 +5,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from truth_engine.contracts.models import RawArena
+from truth_engine.contracts.stages import EvaluatedArena
+
 
 class FounderConstraints(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -36,6 +39,8 @@ class LiveRunRequest(BaseModel):
 
     candidate_id: str = Field(default_factory=lambda: f"run_{uuid4().hex[:10]}")
     founder_constraints: FounderConstraints = Field(default_factory=FounderConstraints)
+    seed_arena: RawArena | None = None
+    seed_arena_evaluation: EvaluatedArena | None = None
 
     @classmethod
     def from_path(cls, path: Path) -> LiveRunRequest:

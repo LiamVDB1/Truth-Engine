@@ -69,7 +69,7 @@ def test_build_prompt_includes_tool_manifest_for_tool_backed_agent() -> None:
 
     assert "allowed tools" in bundle.system_prompt.lower()
     assert "`add_signal`" in bundle.system_prompt
-    assert "`fetch_page`" in bundle.system_prompt
+    assert "`read_page`" in bundle.system_prompt
 
 
 def test_build_prompt_removes_reddit_tools_when_reddit_is_not_configured() -> None:

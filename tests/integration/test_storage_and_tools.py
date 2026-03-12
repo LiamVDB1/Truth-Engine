@@ -69,7 +69,7 @@ def test_repository_tool_runtime_rejects_unauthorized_tools_and_dedups_urls(
 
     unavailable = runtime.invoke(
         AgentName.SIGNAL_SCOUT,
-        "fetch_page",
+        "read_page",
         {"candidate_id": "cand_tools", "url": "https://example.com"},
     )
 

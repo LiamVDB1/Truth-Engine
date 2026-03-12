@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -28,6 +30,14 @@ class Settings(BaseSettings):
     litellm_api_key: SecretStr | None = Field(default=None)
     litellm_api_base: str | None = None
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    llm_reasoning_effort: Literal[
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    ] | None = "medium"
     llm_max_retries: int = Field(default=2, ge=0)
     agent_max_tool_rounds: int = Field(default=100, ge=1, le=200)
     required_tool_reminder_interval: int = Field(default=10, ge=1, le=50)
@@ -50,7 +60,15 @@ class Settings(BaseSettings):
         )
 
     def has_serper_search(self) -> bool:
-        return self.serper_api_key is not None
+        return _has_secret_value(self.serper_api_key)
 
     def has_reddit_tools(self) -> bool:
-        return self.reddit_client_id is not None and self.reddit_client_secret is not None
+        return _has_secret_value(self.reddit_client_id) and _has_secret_value(
+            self.reddit_client_secret
+        )
+
+
+def _has_secret_value(secret: SecretStr | None) -> bool:
+    if secret is None:
+        return False
+    return bool(secret.get_secret_value().strip())

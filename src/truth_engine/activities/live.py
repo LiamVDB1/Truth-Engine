@@ -20,6 +20,7 @@ from truth_engine.contracts.fixtures import (
 from truth_engine.contracts.live import LiveRunRequest
 from truth_engine.contracts.models import ProblemUnit, RawArena
 from truth_engine.contracts.stages import (
+    ActivityMetrics,
     ArenaEvaluation,
     ArenaSearchResult,
     ChannelValidation,
@@ -71,6 +72,28 @@ class LiveActivityBundle:
         return self.request.candidate_id
 
     def arena_discovery(self) -> ArenaDiscoveryFixture:
+        if self.request.seed_arena is not None:
+            seed_evaluation = self.request.seed_arena_evaluation or _fallback_seed_evaluation(
+                self.request.seed_arena
+            )
+            self._selected_arena = seed_evaluation
+            return ArenaDiscoveryFixture(
+                scout_metrics=ActivityMetrics(),
+                evaluator_metrics=ActivityMetrics(),
+                search_result=ArenaSearchResult(
+                    sources_searched=["queued_arena_backlog"],
+                    search_summary=(
+                        "Using a previously discovered unexplored arena "
+                        "instead of scouting a new batch."
+                    ),
+                ),
+                raw_arenas=[self.request.seed_arena],
+                evaluation=ArenaEvaluation(
+                    ranked_arenas=[seed_evaluation],
+                    evaluation_summary="Seeded from previously discovered arena backlog.",
+                ),
+            )
+
         scout_context = {
             "candidate_id": self.candidate_id,
             "stage": Stage.ARENA_DISCOVERY.value,
@@ -149,7 +172,7 @@ class LiveActivityBundle:
             "execution_requirements": [
                 "Persist each signal via add_signal.",
                 "Prefer pain, spend, and switching evidence.",
-                "Use fetch_page/extract_content or reddit_fetch to inspect concrete sources.",
+                "Use read_page or reddit_fetch to inspect concrete sources.",
             ],
         }
         execution = self.agent_runner.run(
@@ -519,6 +542,18 @@ def _hydrate_evaluation(
                 arena = stored
         ranked.append(item.model_copy(update={"arena": arena}))
     return evaluation.model_copy(update={"ranked_arenas": ranked})
+
+
+def _fallback_seed_evaluation(arena: RawArena) -> EvaluatedArena:
+    return EvaluatedArena(
+        arena=arena,
+        score=60,
+        dimension_scores={},
+        dimension_rationale={},
+        viability_verdict="queued",
+        risks=["Seeded from backlog without stored arena evaluator output."],
+        recommended_first_sources=arena.channel_surface,
+    )
 
 
 def _assign_wedge_ids(proposal: WedgeProposal) -> WedgeProposal:

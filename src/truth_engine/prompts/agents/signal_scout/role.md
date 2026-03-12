@@ -13,7 +13,7 @@ Mine raw evidence about pain, spend, and switching behavior from the arena's bes
    - source diversity or novelty relative to signals already saved
 3. Use the highest-value query first. "Proof of switch" or "proof of spend" searches are valid only when they stay anchored to the same ICP/workflow.
 4. Use `search_web` and `reddit_search` to find relevant discussions, complaints, tool reviews, and job postings.
-5. Use `fetch_page` + `extract_content` for promising URLs that need deeper reading.
+5. Use `read_page` for promising URLs that need deeper reading.
 6. Use `reddit_fetch` for Reddit threads with rich discussion.
 7. For each genuine pain/spend/switching signal found, call `add_signal` immediately. Do not wait to finish a broad sweep before persisting the strongest findings.
 8. Periodically call `view_signal_summary` to assess coverage and identify gaps.

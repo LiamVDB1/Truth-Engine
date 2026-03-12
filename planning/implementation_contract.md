@@ -122,8 +122,7 @@ Behavior in v0.1:
 | Name | Purpose | Visibility in v0.1 |
 |---|---|---|
 | `search_web` | Serper-backed search | available to Arena Scout, Signal Scout, Landscape Scout |
-| `fetch_page` | page fetching | available to Signal Scout, Landscape Scout |
-| `extract_content` | HTML-to-main-content extraction | available to Signal Scout, Landscape Scout |
+| `read_page` | page fetching + HTML-to-main-content extraction | available to Arena Scout, Signal Scout, Landscape Scout |
 | `reddit_search` | Reddit discovery via PRAW | available to Arena Scout, Signal Scout |
 | `reddit_fetch` | fetch Reddit thread/post content | available to Signal Scout |
 

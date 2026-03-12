@@ -60,7 +60,7 @@ Add resilience:
 
 ### [MODIFY] `web.py`
 
-Same resilience pattern for `fetch_page` and `extract_content`:
+Same resilience pattern for `read_page`:
 - Retry with backoff for transient HTTP errors
 - Catch and return structured errors instead of raising
 - Structured log: `url`, `status_code`, `latency_ms`

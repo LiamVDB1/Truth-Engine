@@ -28,7 +28,7 @@ The v0.1 boundary is unchanged:
   channel plans, decisions, and cost logs
 - live tool runtime for:
   - `search_web` via Serper
-  - `fetch_page` and `extract_content`
+  - `read_page`
   - `reddit_search` and `reddit_fetch` via PRAW
 - LiteLLM-backed agent execution with:
   - structured JSON outputs

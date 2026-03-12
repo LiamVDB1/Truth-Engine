@@ -58,14 +58,12 @@ class RepositoryToolRuntime:
         repository: TruthEngineRepository,
         *,
         search_client: Any | None = None,
-        page_fetcher: Any | None = None,
-        content_extractor: Any | None = None,
+        web_client: Any | None = None,
         reddit_client: Any | None = None,
     ):
         self.repository = repository
         self.search_client = search_client
-        self.page_fetcher = page_fetcher
-        self.content_extractor = content_extractor
+        self.web_client = web_client
         self.reddit_client = reddit_client
 
     def invoke(self, agent: AgentName, tool_name: str, payload: dict[str, Any]) -> Any:
@@ -85,10 +83,8 @@ class RepositoryToolRuntime:
         tool_names = self.permitted_tool_names(agent)
         if self.search_client is None:
             tool_names.discard("search_web")
-        if self.page_fetcher is None:
-            tool_names.discard("fetch_page")
-        if self.content_extractor is None:
-            tool_names.discard("extract_content")
+        if self.web_client is None:
+            tool_names.discard("read_page")
         if self.reddit_client is None:
             tool_names.discard("reddit_search")
             tool_names.discard("reddit_fetch")
@@ -167,15 +163,16 @@ class RepositoryToolRuntime:
         )
         return cast(dict[str, Any], result)
 
-    def _handle_fetch_page(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.page_fetcher is None:
-            return _unavailable_tool("fetch_page")
-        return cast(dict[str, Any], self.page_fetcher.fetch_page(str(payload["url"])))
-
-    def _handle_extract_content(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.content_extractor is None:
-            return _unavailable_tool("extract_content")
-        return cast(dict[str, Any], self.content_extractor.extract_content(str(payload["url"])))
+    def _handle_read_page(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.web_client is None:
+            return _unavailable_tool("read_page")
+        return cast(
+            dict[str, Any],
+            self.web_client.read_page(
+                str(payload["url"]),
+                include_raw_html=bool(payload.get("include_raw_html", False)),
+            ),
+        )
 
     def _handle_reddit_search(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.reddit_client is None:

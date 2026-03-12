@@ -9,12 +9,14 @@ from truth_engine.adapters.db.migrate import upgrade_database
 from truth_engine.adapters.db.repositories import TruthEngineRepository
 from truth_engine.config.settings import Settings
 from truth_engine.contracts.fixtures import FixtureScenario
-from truth_engine.contracts.live import LiveRunRequest
+from truth_engine.contracts.live import FounderConstraints, LiveRunRequest
 from truth_engine.contracts.temporal import TruthEngineRunInput
 from truth_engine.prompts.builder import build_prompt
 from truth_engine.reporting.dossier import write_dossier_artifacts
 from truth_engine.services.logging import configure_logging
 from truth_engine.temporal.runtime import execute_truth_engine_run, run_worker
+
+_FIXTURE_DEFAULT_DATABASE_URL = "sqlite:///./truth_engine.fixture.db"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +26,34 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init-db":
         upgrade_database(args.database_url)
         print(f"Initialized schema at {args.database_url}")
+        return 0
+
+    if args.command == "db-stats":
+        repository = TruthEngineRepository.from_database_url(args.database_url)
+        stats = repository.database_stats()
+        print(f"Candidates: {stats['candidates']}")
+        print(f"Raw arenas: {stats['raw_arenas']}")
+        print(f"Raw signals: {stats['raw_signals']}")
+        print(f"Candidate statuses: {json.dumps(stats['candidate_statuses'], sort_keys=True)}")
+        print(f"Arena statuses: {json.dumps(stats['arena_statuses'], sort_keys=True)}")
+        return 0
+
+    if args.command == "db-clear-unexplored-arenas":
+        repository = TruthEngineRepository.from_database_url(args.database_url)
+        removed = repository.clear_unexplored_arenas(dry_run=args.dry_run)
+        prefix = "Would remove" if args.dry_run else "Removed"
+        suffix = " (dry-run)" if args.dry_run else ""
+        print(f"{prefix} {removed} unexplored arena(s){suffix}")
+        return 0
+
+    if args.command == "db-reset":
+        if not args.yes:
+            print("Refusing to reset the runtime database without --yes")
+            return 1
+        repository = TruthEngineRepository.from_database_url(args.database_url)
+        counts = repository.reset_runtime_state()
+        print(f"Reset runtime tables at {args.database_url}")
+        print(json.dumps(counts, sort_keys=True))
         return 0
 
     if args.command == "run-fixture":
@@ -135,9 +165,20 @@ def _build_parser() -> argparse.ArgumentParser:
     init_db = subparsers.add_parser("init-db")
     init_db.add_argument("--database-url", default=default_settings.database_url)
 
+    db_stats = subparsers.add_parser("db-stats")
+    db_stats.add_argument("--database-url", default=default_settings.database_url)
+
+    db_clear_unexplored = subparsers.add_parser("db-clear-unexplored-arenas")
+    db_clear_unexplored.add_argument("--database-url", default=default_settings.database_url)
+    db_clear_unexplored.add_argument("--dry-run", action="store_true")
+
+    db_reset = subparsers.add_parser("db-reset")
+    db_reset.add_argument("--database-url", default=default_settings.database_url)
+    db_reset.add_argument("--yes", action="store_true")
+
     run_fixture = subparsers.add_parser("run-fixture")
     run_fixture.add_argument("--fixture", required=True)
-    run_fixture.add_argument("--database-url", default=default_settings.database_url)
+    run_fixture.add_argument("--database-url", default=_FIXTURE_DEFAULT_DATABASE_URL)
     run_fixture.add_argument("--output-dir", default="./out")
     run_fixture.add_argument("--prompt-version", default="live-v1")
     run_fixture.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
@@ -187,10 +228,30 @@ def _resolve_live_request(
         if candidate is not None and candidate.request_payload is not None:
             request = LiveRunRequest.model_validate(candidate.request_payload)
         else:
-            request = LiveRunRequest(candidate_id=args.candidate_id)
+            request = _seeded_live_request(repository) or LiveRunRequest(
+                candidate_id=args.candidate_id
+            )
     else:
-        request = LiveRunRequest.default()
+        request = _seeded_live_request(repository) or LiveRunRequest.default()
 
     if args.candidate_id is not None and request.candidate_id != args.candidate_id:
         request = request.model_copy(update={"candidate_id": args.candidate_id})
     return request
+
+
+def _seeded_live_request(repository: TruthEngineRepository) -> LiveRunRequest | None:
+    queued = repository.claim_next_unexplored_arena()
+    if queued is None:
+        return None
+    founder_constraints = FounderConstraints()
+    if queued.request_payload is not None:
+        try:
+            seeded_request = LiveRunRequest.model_validate(queued.request_payload)
+            founder_constraints = seeded_request.founder_constraints
+        except Exception:
+            founder_constraints = FounderConstraints()
+    return LiveRunRequest(
+        founder_constraints=founder_constraints,
+        seed_arena=queued.arena,
+        seed_arena_evaluation=queued.evaluated_arena,
+    )

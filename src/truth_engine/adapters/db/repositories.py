@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -15,9 +16,11 @@ from truth_engine.contracts.checkpoints import (
 from truth_engine.contracts.models import CostRecord, ProblemUnit, RawArena, RawSignal
 from truth_engine.contracts.stages import (
     ActivityMetrics,
+    ArenaEvaluation,
     CandidateDossier,
     CandidateRecord,
     DecisionEvent,
+    EvaluatedArena,
     LandscapeEntry,
 )
 from truth_engine.domain.enums import (
@@ -230,11 +233,71 @@ class TruthEngineRepository:
                     select(raw_arena_table.c.payload).where(
                         raw_arena_table.c.candidate_id == candidate_id
                     )
-                )
+            )
                 .scalars()
                 .all()
             )
         return [RawArena.model_validate(payload) for payload in rows]
+
+    def claim_next_unexplored_arena(self) -> QueuedArenaSeed | None:
+        with self.engine.begin() as connection:
+            rows = (
+                connection.execute(
+                    select(
+                        raw_arena_table.c.id,
+                        raw_arena_table.c.candidate_id,
+                        raw_arena_table.c.payload,
+                        raw_arena_table.c.created_at,
+                    )
+                    .where(raw_arena_table.c.status == "proposed")
+                    .order_by(raw_arena_table.c.created_at, raw_arena_table.c.id)
+                )
+                .mappings()
+                .all()
+            )
+            if not rows:
+                return None
+
+            rows_by_candidate: dict[str, list[RowMapping]] = {}
+            ordered_candidate_ids: list[str] = []
+            for row in rows:
+                candidate_id = str(row["candidate_id"])
+                if candidate_id not in rows_by_candidate:
+                    rows_by_candidate[candidate_id] = []
+                    ordered_candidate_ids.append(candidate_id)
+                rows_by_candidate[candidate_id].append(row)
+
+            for candidate_id in ordered_candidate_ids:
+                candidate_rows = rows_by_candidate[candidate_id]
+                chosen_row, evaluation = _pick_seeded_arena(
+                    connection,
+                    candidate_id,
+                    candidate_rows,
+                )
+                claimed = connection.execute(
+                    update(raw_arena_table)
+                    .where(
+                        raw_arena_table.c.id == chosen_row["id"],
+                        raw_arena_table.c.status == "proposed",
+                    )
+                    .values(status="transferred", updated_at=_utc_now())
+                )
+                if claimed.rowcount != 1:
+                    continue
+
+                request_payload = connection.execute(
+                    select(candidate_table.c.request_payload).where(
+                        candidate_table.c.candidate_id == candidate_id
+                    )
+                ).scalar_one_or_none()
+                return QueuedArenaSeed(
+                    arena=RawArena.model_validate(chosen_row["payload"]),
+                    evaluated_arena=evaluation,
+                    request_payload=(
+                        dict(request_payload) if isinstance(request_payload, dict) else None
+                    ),
+                )
+        return None
 
     def set_selected_arena(self, candidate_id: str, arena_id: str) -> None:
         self.update_candidate(candidate_id, selected_arena_id=arena_id)
@@ -815,6 +878,86 @@ class TruthEngineRepository:
                 .values(status="killed", updated_at=_utc_now())
             )
 
+    def clear_unexplored_arenas(self, *, dry_run: bool = False) -> int:
+        with self.engine.begin() as connection:
+            arena_ids = (
+                connection.execute(
+                    select(raw_arena_table.c.id).where(raw_arena_table.c.status == "proposed")
+                )
+                .scalars()
+                .all()
+            )
+            if dry_run:
+                return len(arena_ids)
+            if arena_ids:
+                connection.execute(
+                    delete(raw_arena_table).where(raw_arena_table.c.id.in_(list(arena_ids)))
+                )
+            return len(arena_ids)
+
+    def reset_runtime_state(self) -> dict[str, int]:
+        tables = (
+            agent_checkpoint_table,
+            candidate_stage_run_table,
+            channel_plan_table,
+            cost_log_table,
+            decision_event_table,
+            landscape_entry_table,
+            learning_entry_table,
+            problem_unit_evidence_table,
+            problem_unit_table,
+            processed_source_table,
+            raw_arena_table,
+            raw_signal_table,
+            wedge_hypothesis_table,
+            candidate_table,
+        )
+        counts: dict[str, int] = {}
+        with self.engine.begin() as connection:
+            for table in tables:
+                row_count = connection.execute(select(func.count()).select_from(table)).scalar_one()
+                counts[table.name] = int(row_count)
+                if row_count:
+                    connection.execute(delete(table))
+        return counts
+
+    def database_stats(self) -> dict[str, Any]:
+        with self.engine.begin() as connection:
+            candidate_count = connection.execute(
+                select(func.count()).select_from(candidate_table)
+            ).scalar_one()
+            raw_arena_count = connection.execute(
+                select(func.count()).select_from(raw_arena_table)
+            ).scalar_one()
+            raw_signal_count = connection.execute(
+                select(func.count()).select_from(raw_signal_table)
+            ).scalar_one()
+            candidate_status_rows = (
+                connection.execute(
+                    select(candidate_table.c.status, func.count())
+                    .group_by(candidate_table.c.status)
+                    .order_by(candidate_table.c.status)
+                )
+                .all()
+            )
+            arena_status_rows = (
+                connection.execute(
+                    select(raw_arena_table.c.status, func.count())
+                    .group_by(raw_arena_table.c.status)
+                    .order_by(raw_arena_table.c.status)
+                )
+                .all()
+            )
+        return {
+            "candidates": int(candidate_count),
+            "raw_arenas": int(raw_arena_count),
+            "raw_signals": int(raw_signal_count),
+            "candidate_statuses": {
+                str(status): int(count) for status, count in candidate_status_rows
+            },
+            "arena_statuses": {str(status): int(count) for status, count in arena_status_rows},
+        }
+
     @staticmethod
     def _insert_landscape_entry(
         connection: Connection, candidate_id: str, entry: LandscapeEntry
@@ -913,3 +1056,51 @@ def _new_id(prefix: str) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+@dataclass(frozen=True)
+class QueuedArenaSeed:
+    arena: RawArena
+    evaluated_arena: EvaluatedArena
+    request_payload: dict[str, Any] | None
+
+
+def _pick_seeded_arena(
+    connection: Connection,
+    candidate_id: str,
+    candidate_rows: list[RowMapping],
+) -> tuple[RowMapping, EvaluatedArena]:
+    by_id = {str(row["id"]): row for row in candidate_rows}
+    by_fingerprint = {
+        RawArena.model_validate(row["payload"]).fingerprint(): row for row in candidate_rows
+    }
+    evaluation_payload = connection.execute(
+        select(candidate_stage_run_table.c.payload).where(
+            candidate_stage_run_table.c.candidate_id == candidate_id,
+            candidate_stage_run_table.c.agent == AgentName.ARENA_EVALUATOR.value,
+            candidate_stage_run_table.c.attempt_index == 0,
+        )
+    ).scalar_one_or_none()
+    if evaluation_payload is not None:
+        evaluation = ArenaEvaluation.model_validate(evaluation_payload)
+        for ranked_arena in evaluation.ranked_arenas:
+            ranked_id = ranked_arena.arena.id
+            matched_row = by_id.get(ranked_id) if ranked_id is not None else None
+            if matched_row is None:
+                matched_row = by_fingerprint.get(ranked_arena.arena.fingerprint())
+            if matched_row is None:
+                continue
+            hydrated_arena = RawArena.model_validate(matched_row["payload"])
+            return matched_row, ranked_arena.model_copy(update={"arena": hydrated_arena})
+
+    fallback_row = candidate_rows[0]
+    fallback_arena = RawArena.model_validate(fallback_row["payload"])
+    return fallback_row, EvaluatedArena(
+        arena=fallback_arena,
+        score=60,
+        dimension_scores={},
+        dimension_rationale={},
+        viability_verdict="queued",
+        risks=["Seeded from an unexplored arena backlog without a stored evaluator ranking."],
+        recommended_first_sources=fallback_arena.channel_surface,
+    )

@@ -762,8 +762,7 @@ class TemporalCandidateActivities:
         return RepositoryToolRuntime(
             repository,
             search_client=search_client,
-            page_fetcher=fetch_client,
-            content_extractor=fetch_client,
+            web_client=fetch_client,
             reddit_client=reddit_client,
         )
 

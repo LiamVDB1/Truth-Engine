@@ -24,6 +24,7 @@ def test_arena_scout_bundle_contains_only_expected_tools() -> None:
         "remove_arena_proposal",
         "view_arena_proposals",
         "search_web",
+        "read_page",
         "reddit_search",
     ]
 
@@ -36,8 +37,7 @@ def test_landscape_scout_bundle_includes_landscape_tools() -> None:
         "add_landscape_entry",
         "view_landscape",
         "search_web",
-        "fetch_page",
-        "extract_content",
+        "read_page",
     } <= names
 
 
@@ -69,3 +69,18 @@ def test_tool_bundle_includes_reddit_tools_when_reddit_is_configured() -> None:
     names = {tool.name for tool in bundle}
     assert "reddit_search" in names
     assert "reddit_fetch" in names
+
+
+def test_tool_bundle_omits_reddit_tools_when_reddit_credentials_are_blank() -> None:
+    bundle = tool_bundle_for_agent(
+        AgentName.SIGNAL_SCOUT,
+        settings=Settings.model_construct(
+            serper_api_key=None,
+            reddit_client_id=SecretStr(" "),
+            reddit_client_secret=SecretStr(""),
+        ),
+    )
+
+    names = {tool.name for tool in bundle}
+    assert "reddit_search" not in names
+    assert "reddit_fetch" not in names

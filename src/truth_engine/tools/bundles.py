@@ -12,14 +12,14 @@ _AGENT_TOOL_NAMES: dict[AgentName, tuple[str, ...]] = {
         "remove_arena_proposal",
         "view_arena_proposals",
         "search_web",
+        "read_page",
         "reddit_search",
     ),
     AgentName.SIGNAL_SCOUT: (
         "add_signal",
         "view_signal_summary",
         "search_web",
-        "fetch_page",
-        "extract_content",
+        "read_page",
         "reddit_search",
         "reddit_fetch",
     ),
@@ -27,8 +27,7 @@ _AGENT_TOOL_NAMES: dict[AgentName, tuple[str, ...]] = {
         "add_landscape_entry",
         "view_landscape",
         "search_web",
-        "fetch_page",
-        "extract_content",
+        "read_page",
     ),
 }
 

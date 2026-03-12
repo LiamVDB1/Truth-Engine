@@ -7,6 +7,9 @@ This page describes how the repo is executed today.
 | Command | Purpose |
 |---|---|
 | `python -m truth_engine init-db` | apply Alembic migrations |
+| `python -m truth_engine db-stats` | print candidate / arena / signal counts and status breakdowns |
+| `python -m truth_engine db-clear-unexplored-arenas` | remove queued arenas that were never explored |
+| `python -m truth_engine db-reset --yes` | wipe all runtime tables |
 | `python -m truth_engine run-fixture --fixture <file>` | submit a Temporal fixture workflow through Gate B |
 | `python -m truth_engine run-live` | submit a Temporal live workflow for stages `0-5` |
 | `python -m truth_engine run-worker` | run a dedicated Temporal worker for Truth Engine workflows |
@@ -16,6 +19,10 @@ This page describes how the repo is executed today.
 Defaults come from `Settings`, so `--database-url` and `--output-dir` are optional for the main commands.
 `run-fixture` and `run-live` start an inline worker by default; use `--no-inline-worker` when a
 separate `run-worker` process is already running.
+
+Important safety default:
+- `run-fixture` now defaults to `sqlite:///./truth_engine.fixture.db` instead of the live/default database URL.
+- `run-live` still defaults to `TRUTH_ENGINE_DATABASE_URL` / `Settings.database_url`.
 
 ## Configuration
 
@@ -36,11 +43,13 @@ Environment variables are loaded through `pydantic-settings` with the `TRUTH_ENG
 | `TRUTH_ENGINE_AGENT_MODEL_OVERRIDES` | JSON object keyed by agent name |
 | `TRUTH_ENGINE_LITELLM_API_KEY` | direct/provider or proxy auth key |
 | `TRUTH_ENGINE_LITELLM_API_BASE` | optional LiteLLM proxy base URL |
+| `TRUTH_ENGINE_LLM_REASONING_EFFORT` | default reasoning effort for compatible models, default `medium` |
 
 Important default mismatch:
 - `Settings` defaults to local PostgreSQL plus `minimax-m2.5`, `kimi-k2.5`, and `gpt-5.4`
 - `.env.example` demonstrates a SQLite database and `openai/gpt-4.1*` routes
 - whichever source loads last in your environment wins
+- fixture runs are intentionally exempt from the shared DB default and use their own SQLite file unless overridden
 
 ### Live adapter settings
 
@@ -105,7 +114,7 @@ Implemented tool groups:
 | Arena | `create_arena_proposal`, `edit_arena_proposal`, `remove_arena_proposal`, `view_arena_proposals` |
 | Signals | `add_signal`, `view_signal_summary` |
 | Landscape | `add_landscape_entry`, `view_landscape` |
-| Network | `search_web`, `fetch_page`, `extract_content`, `reddit_search`, `reddit_fetch` |
+| Network | `search_web`, `read_page`, `reddit_search`, `reddit_fetch` |
 
 `RepositoryToolRuntime` enforces:
 - per-agent authorization
@@ -117,6 +126,9 @@ The concrete tool-backed agents are:
 - `arena_scout`
 - `signal_scout`
 - `landscape_scout`
+
+Arena Scout nuance:
+- `arena_scout` can now use `read_page`, not just search snippets and Reddit discovery.
 
 ## LLM Execution Loop
 
@@ -141,12 +153,14 @@ Important implementation detail:
 - retries `httpx` timeouts, connection errors, and HTTP status errors
 - returns structured errors instead of raising after retry exhaustion
 
-### Web fetch + extraction
+### Web reading
 
 - `WebFetchClient`
-- `fetch_page(url)` returns raw response text
-- `extract_content(url)` refetches the page and runs `trafilatura.extract(...)`
-- both methods retry before returning structured errors
+- prefers Scrapling fetchers when available, otherwise falls back to `httpx`
+- `read_page(url)` fetches once and returns extracted readable content
+- pass `include_raw_html=true` only when raw HTML is actually needed
+- extraction uses `trafilatura.extract(...)` on the fetched HTML
+- the fetch path retries before returning structured errors
 
 ### Reddit
 
@@ -179,6 +193,16 @@ The trace writer appends:
 When the local Temporal service is running, Temporal Web is available at
 [http://localhost:8233](http://localhost:8233).
 
+## Arena Queue Reuse
+
+`run-live` now checks for unexplored queued arenas before creating a brand new scouting batch.
+
+Current behavior:
+- unexplored arenas are `raw_arena.status = "proposed"`
+- when a live run adopts one of those queued arenas, the original row is marked `transferred`
+- the new candidate seeds arena discovery from that adopted arena and skips the live Arena Scout / Arena Evaluator LLM calls for that stage
+- when no queued arenas remain, `run-live` falls back to normal arena scouting
+
 Temporal Web shows:
 - workflow execution history
 - activity boundaries, retries, and durations
@@ -192,6 +216,6 @@ results.
 
 - `run-live` starts from founder constraints only; it does not accept operator briefs or seed arenas.
 - `LiveActivityBundle` currently caps itself at 6 arena proposals and 60 raw signals.
-- `WebFetchClient.extract_content(...)` refetches the URL rather than extracting from a previously fetched response.
+- there is still no true context-window budgeting or prompt-compaction system; prompt size is only controlled indirectly through bounded inputs and tool/result limits.
 - `run-fixture` and `run-live` now require a reachable Temporal service. The local
   `docker compose up -d temporal` path is the expected dev setup.

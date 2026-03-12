@@ -104,7 +104,7 @@ flowchart LR
 - `db/migrate.py`: Alembic upgrade entrypoint.
 - `llm/litellm_runner.py`: LLM execution loop with tool calls, JSON repair, duplicate-call blocking, and trace capture.
 - `search/serper.py`: Serper client with retry + structured error return.
-- `scraping/web.py`: `httpx` fetch and `trafilatura` extraction with retry.
+- `scraping/web.py`: Scrapling-preferred fetch path with `httpx` fallback plus `trafilatura` extraction and retry.
 - `reddit/praw_client.py`: Reddit search/fetch via PRAW.
 
 ### `truth_engine.prompts`
@@ -153,6 +153,6 @@ These points matter because older planning docs describe a broader or slightly d
 - The database layer is SQLAlchemy Core plus Alembic, not an ORM-heavy design.
 - SQLite is used heavily in tests and local flows even though PostgreSQL is the intended production store.
 - Prompt compilation is implemented with Pydantic and Markdown role files; there is no Instructor integration in the current code.
-- Web extraction uses `httpx` + `trafilatura`; Scrapling is not currently wired.
+- Web extraction now prefers Scrapling when installed and falls back to `httpx` otherwise.
 - `CandidateWorkflowRunner` still exists, but it is now an activity-side persistence helper rather
   than the top-level orchestrator.

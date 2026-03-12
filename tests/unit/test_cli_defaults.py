@@ -13,9 +13,17 @@ def test_cli_uses_settings_database_default_and_out_dir() -> None:
     parser = _build_parser()
 
     run_live_args = parser.parse_args(["run-live"])
+    run_fixture_args = parser.parse_args(
+        [
+            "run-fixture",
+            "--fixture",
+            "tests/fixtures/workflows/gate_b_retry_kill.json",
+        ]
+    )
     export_args = parser.parse_args(["export-dossier", "--candidate-id", "cand_123"])
 
     assert run_live_args.database_url
+    assert run_fixture_args.database_url != run_live_args.database_url
     assert run_live_args.output_dir == "./out"
     assert export_args.database_url
     assert export_args.output_dir == "./out"

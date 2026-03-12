@@ -236,9 +236,16 @@ class LiteLLMAgentRunner:
                 "messages": messages,
                 "tools": tools,
                 "tool_choice": tool_choice,
-                "temperature": self.settings.llm_temperature,
                 "max_retries": self.settings.llm_max_retries,
             }
+            reasoning_effort = _reasoning_effort_for_model(
+                model=model,
+                configured_effort=self.settings.llm_reasoning_effort,
+            )
+            if reasoning_effort is not None:
+                request_kwargs["reasoning_effort"] = reasoning_effort
+            if not _should_omit_temperature(model=model, reasoning_effort=reasoning_effort):
+                request_kwargs["temperature"] = self.settings.llm_temperature
             response = self._request_completion(
                 model=model,
                 request_kwargs=request_kwargs,
@@ -888,6 +895,45 @@ def _tool_names(tools: list[dict[str, Any]] | None) -> list[str]:
             if isinstance(name, str):
                 names.append(name)
     return names
+
+
+def _reasoning_effort_for_model(
+    *,
+    model: str,
+    configured_effort: str | None,
+) -> str | None:
+    if configured_effort is None:
+        return None
+    normalized = model.lower()
+    supported_prefixes = (
+        "gpt-5",
+        "openai/gpt-5",
+        "openai/responses/gpt-5",
+        "o1",
+        "openai/o1",
+        "o3",
+        "openai/o3",
+        "o4",
+        "openai/o4",
+        "claude-3.7",
+        "anthropic/claude-3.7",
+        "claude-4",
+        "anthropic/claude-4",
+        "magistral",
+        "mistral/magistral",
+    )
+    return configured_effort if normalized.startswith(supported_prefixes) else None
+
+
+def _should_omit_temperature(
+    *,
+    model: str,
+    reasoning_effort: str | None,
+) -> bool:
+    if reasoning_effort is None:
+        return False
+    normalized = model.lower()
+    return normalized.startswith(("gpt-5", "openai/gpt-5", "openai/responses/gpt-5"))
 
 
 def _response_format_for_model[TResponse: BaseModel](

@@ -117,7 +117,7 @@ Some fields exist in the contracts or schema but are not fully exploited yet:
 
 - `candidate.caution_flag` exists in storage, but the workflow mainly carries caution as dossier-level `caution_flags`
 - `CandidateDossier.cost_breakdown` and `CandidateDossier.total_cost_eur` exist in the schema, but the current dossier builder does not populate them
-- `raw_arena.status` is actively used for `proposed`, `selected`, and `killed`, but there is no broader arena lifecycle table yet
+- `raw_arena.status` is actively used for `proposed`, `selected`, `transferred`, and `killed`, but there is no broader arena lifecycle table yet
 
 ## Migration State
 

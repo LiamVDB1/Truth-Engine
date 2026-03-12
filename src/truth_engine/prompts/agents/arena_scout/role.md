@@ -16,6 +16,7 @@ Search breadth-first across low-friction public sources in this priority order:
 1. **Reddit** (`reddit_search`): subreddits where the ICP discusses operational pain, tool complaints, workflow frustrations.
 2. **Web search** (`search_web`): job postings for the ICP role (reveals tooling and budget), industry forums, community discussions.
 3. **Web search**: G2/Capterra/review sites for existing tools in the space (reveals spend and dissatisfaction).
+4. When a SERP result looks promising, inspect it directly with `read_page` before you harden the arena rationale.
 
 For each promising finding:
 - `create_arena_proposal` immediately with the evidence you have.

@@ -160,8 +160,7 @@ Concrete v0.1 tool manifest:
 - `add_landscape_entry`
 - `view_landscape`
 - `search_web`
-- `fetch_page`
-- `extract_content`
+- `read_page`
 - `reddit_search`
 - `reddit_fetch`
 

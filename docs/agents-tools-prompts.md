@@ -6,11 +6,11 @@ This repository does not implement a generic agent framework. It implements one 
 
 | Agent | Stage | Live implementation | Tool access | Output contract | Role file |
 |---|---|---|---|---|---|
-| `arena_scout` | Arena discovery | yes | arena CRUD + `search_web` + optional Reddit search | `ArenaSearchResult` | `prompts/agents/arena_scout/role.md` |
+| `arena_scout` | Arena discovery | yes | arena CRUD + `search_web` + `read_page` + optional Reddit search | `ArenaSearchResult` | `prompts/agents/arena_scout/role.md` |
 | `arena_evaluator` | Arena discovery | yes | none | `ArenaEvaluation` | `prompts/agents/arena_evaluator/role.md` |
-| `signal_scout` | Signal mining | yes | signal CRUD + search/fetch/extract + optional Reddit | `SignalMiningResult` | `prompts/agents/signal_scout/role.md` |
+| `signal_scout` | Signal mining | yes | signal CRUD + search/read-page + optional Reddit | `SignalMiningResult` | `prompts/agents/signal_scout/role.md` |
 | `normalizer` | Normalization | yes | none | `NormalizationResult` | `prompts/agents/normalizer/role.md` |
-| `landscape_scout` | Landscape research | yes | landscape CRUD + search/fetch/extract | `LandscapeReport` | `prompts/agents/landscape_scout/role.md` |
+| `landscape_scout` | Landscape research | yes | landscape CRUD + search/read-page | `LandscapeReport` | `prompts/agents/landscape_scout/role.md` |
 | `scorer` | Scoring | yes | none | `ScoringResult` | `prompts/agents/scorer/role.md` |
 | `skeptic` | Skeptic review | yes | none | `SkepticReport` | `prompts/agents/skeptic/role.md` |
 | `wedge_designer` | Wedge design | yes | none | `WedgeProposal` | `prompts/agents/wedge_designer/role.md` |
@@ -48,6 +48,7 @@ Prompt details that matter in practice:
 - `prompt_hash` is the first 16 hex chars of `sha256(system_prompt + user_prompt)`
 - role text is rewritten when Reddit tools are unavailable so prompts do not mention tools the runtime cannot expose
 - the compiler supports budget-pressure and past-learning sections, but current live execution only passes `past_learnings` to `arena_scout`, and does not currently pass `budget_mode`
+- there is still no automatic context compaction or token-budgeting pass before prompt submission
 
 ## Tool System
 
@@ -58,14 +59,14 @@ Only three agents are tool-backed today:
 
 ### Registry
 
-`tools/registry.py` defines 13 tools:
+`tools/registry.py` defines 12 tools:
 
 | Group | Tools |
 |---|---|
 | Arena persistence | `create_arena_proposal`, `edit_arena_proposal`, `remove_arena_proposal`, `view_arena_proposals` |
 | Signal persistence | `add_signal`, `view_signal_summary` |
 | Landscape persistence | `add_landscape_entry`, `view_landscape` |
-| Network | `search_web`, `fetch_page`, `extract_content`, `reddit_search`, `reddit_fetch` |
+| Network | `search_web`, `read_page`, `reddit_search`, `reddit_fetch` |
 
 Each tool has:
 - a name and description

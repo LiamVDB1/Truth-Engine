@@ -89,18 +89,11 @@ def tool_registry() -> dict[str, ToolSpec]:
             "search.serper",
         ),
         _tool(
-            "fetch_page",
-            "Fetch a page from the public web.",
+            "read_page",
+            "Fetch a public web page and extract its readable main content in one call.",
             ToolSideEffectLevel.NETWORK,
             ToolCostClass.MEDIUM,
-            "scraping.fetch",
-        ),
-        _tool(
-            "extract_content",
-            "Extract main content from HTML.",
-            ToolSideEffectLevel.NETWORK,
-            ToolCostClass.LOW,
-            "scraping.extract",
+            "scraping.read",
         ),
         _tool(
             "reddit_search",

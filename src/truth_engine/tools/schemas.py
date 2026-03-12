@@ -78,7 +78,17 @@ def _tool_parameters(name: str) -> dict[str, Any]:
             "required": ["query"],
             "additionalProperties": False,
         }
-    if name in {"fetch_page", "extract_content", "reddit_fetch"}:
+    if name == "read_page":
+        return {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "include_raw_html": {"type": "boolean", "default": False},
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        }
+    if name == "reddit_fetch":
         return _string_arg_schema("url")
     if name == "reddit_search":
         return {
@@ -132,8 +142,7 @@ _ORDERED_TOOL_NAMES = (
     "add_landscape_entry",
     "view_landscape",
     "search_web",
-    "fetch_page",
-    "extract_content",
+    "read_page",
     "reddit_search",
     "reddit_fetch",
 )

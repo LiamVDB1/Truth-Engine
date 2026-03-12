@@ -825,13 +825,18 @@ class CandidateWorkflowRunner:
                     "output_contract": "ArenaSearchResult",
                 },
             )
-        if not activities.persists_tool_state:
-            for arena in run.raw_arenas:
-                self.tool_runtime.invoke(
-                    AgentName.ARENA_SCOUT,
-                    "create_arena_proposal",
-                    {"candidate_id": candidate_id, "arena": arena},
-                )
+        existing_fingerprints = {
+            arena.fingerprint() for arena in self.repository.load_arena_proposals(candidate_id)
+        }
+        for arena in run.raw_arenas:
+            if activities.persists_tool_state and arena.fingerprint() in existing_fingerprints:
+                continue
+            self.tool_runtime.invoke(
+                AgentName.ARENA_SCOUT,
+                "create_arena_proposal",
+                {"candidate_id": candidate_id, "arena": arena},
+            )
+            existing_fingerprints.add(arena.fingerprint())
         if self.repository.get_stage_run(candidate_id, AgentName.ARENA_EVALUATOR, 0) is None:
             self._record_agent_stage_run(
                 candidate_id=candidate_id,
