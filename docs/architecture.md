@@ -6,10 +6,13 @@ Truth Engine is organized around a small deterministic core and a set of bounded
 
 ```mermaid
 flowchart LR
-    CLI["CLI (`python -m truth_engine`)"] --> Runner["CandidateWorkflowRunner"]
-    Runner --> Activities["ActivityBundle"]
-    Activities --> Fixture["FixtureActivityBundle"]
+    CLI["CLI (`python -m truth_engine`)"] --> Temporal["Temporal Workflow"]
+    CLI --> Worker["Temporal Worker"]
+
+    Temporal --> Activities["Temporal Activities"]
+    Activities --> Fixture["FixtureScenario Access"]
     Activities --> Live["LiveActivityBundle"]
+    Activities --> Runner["CandidateWorkflowRunner Helpers"]
 
     Runner --> Repo["TruthEngineRepository"]
     Runner --> Trace["RunTraceWriter"]
@@ -34,8 +37,8 @@ flowchart LR
 | Layer | Purpose | Key files |
 |---|---|---|
 | Entry | Parse CLI commands and assemble dependencies | `cli/main.py`, `__main__.py` |
-| Orchestration | Run the candidate state machine and enforce gates/budgets | `workflows/candidate.py` |
-| Activities | Produce stage outputs either from fixtures or live LLM/tool execution | `activities/fixtures.py`, `activities/live.py` |
+| Orchestration | Temporal workflow owning loops, retries, and gate sequencing | `workflows/temporal_candidate.py` |
+| Activities | Temporal stage execution and persistence plus live/fixture execution helpers | `activities/temporal.py`, `activities/live.py`, `activities/fixtures.py` |
 | Contracts | Shared typed payloads across all layers | `contracts/*.py`, `domain/enums.py` |
 | Services | Pure rules and support utilities | `services/*.py` |
 | Tools | Agent-visible tool contracts and authorization | `tools/*.py` |
@@ -53,9 +56,10 @@ flowchart LR
 
 ### `truth_engine.workflows`
 
-- `candidate.py`: the core runtime.
-- `CandidateWorkflowRunner` drives one candidate from stage 0 through Gate B.
-- Owns loop control, budget enforcement, decision persistence, caution flags, and final outcome assembly.
+- `temporal_candidate.py`: Temporal workflow that owns loop control, retries, safety-cap handling,
+  and finalization through Gate B.
+- `candidate.py`: synchronous helper used inside activities for stage-run persistence, resume from
+  durable stage state, cost logging, trace writing, and dossier assembly.
 
 ### `truth_engine.activities`
 
@@ -117,23 +121,25 @@ flowchart LR
 
 ### Fixture mode
 
-1. CLI loads a fixture JSON file.
-2. `FixtureActivityBundle` returns pre-authored stage outputs in sequence.
-3. `CandidateWorkflowRunner` persists them exactly as if they came from live execution.
-4. Integration tests validate loop behavior and repository state.
+1. CLI submits a Temporal workflow with a fixture path.
+2. Temporal activities load indexed fixture outputs from the scenario file.
+3. `CandidateWorkflowRunner` helper methods persist them exactly as if they came from live execution.
+4. Integration tests validate both Temporal orchestration and repository state.
 
 ### Live mode
 
-1. CLI builds repository, tool runtime, LLM runner, and a `LiveRunRequest`.
-2. `LiveActivityBundle` compiles a prompt for each stage.
+1. CLI submits a Temporal workflow and either starts an inline worker or connects to a dedicated one.
+2. Temporal activities create a `LiveActivityBundle` for each stage.
 3. Tool-backed agents call repository and network tools through `RepositoryToolRuntime`.
-4. The workflow runner persists every stage run and cost record, then applies gates.
+4. `CandidateWorkflowRunner` helper methods persist stage runs and cost records while the Temporal
+   workflow applies gates and loop control.
 
 ## State Ownership
 
 The codebase is easier to understand if you keep these ownership boundaries in mind:
 
-- `CandidateWorkflowRunner` owns control flow, retries, gate decisions, and candidate-level state transitions.
+- `TruthEngineCandidateWorkflow` owns control flow, retries, gate decisions, and workflow-level state.
+- `CandidateWorkflowRunner` owns stage persistence, resume from durable stage state, trace logging, and dossier assembly inside activities.
 - `LiveActivityBundle` owns prompt construction, live cross-stage context, and which response model each agent must produce.
 - `LiteLLMAgentRunner` owns tool-calling semantics and JSON repair.
 - `TruthEngineRepository` owns durable state, not business decisions.
@@ -143,9 +149,10 @@ The codebase is easier to understand if you keep these ownership boundaries in m
 
 These points matter because older planning docs describe a broader or slightly different system:
 
-- The orchestrator is a plain Python runner, not a Temporal workflow.
+- The orchestrator is now a Temporal workflow.
 - The database layer is SQLAlchemy Core plus Alembic, not an ORM-heavy design.
 - SQLite is used heavily in tests and local flows even though PostgreSQL is the intended production store.
 - Prompt compilation is implemented with Pydantic and Markdown role files; there is no Instructor integration in the current code.
 - Web extraction uses `httpx` + `trafilatura`; Scrapling is not currently wired.
-- `Settings.temporal_host` and the Temporal docker service exist as forward-looking scaffolding only.
+- `CandidateWorkflowRunner` still exists, but it is now an activity-side persistence helper rather
+  than the top-level orchestrator.

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "postgresql://truth_engine:truth_engine@localhost:5432/truth_engine"
     temporal_host: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "truth-engine"
     prompt_version: str = "live-v1"
     tier1_model: str = "minimax-m2.5"
     tier2_model: str = "kimi-k2.5"

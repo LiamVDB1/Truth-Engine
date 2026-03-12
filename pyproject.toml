@@ -17,6 +17,7 @@ dependencies = [
   "praw>=7.8,<8",
   "psycopg[binary]>=3.2,<4",
   "sqlalchemy>=2.0,<3",
+  "temporalio>=1.10,<2",
   "trafilatura>=2.0,<3",
 ]
 

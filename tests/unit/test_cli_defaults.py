@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from truth_engine.adapters.db.migrate import upgrade_database
 from truth_engine.adapters.db.repositories import TruthEngineRepository
@@ -28,7 +29,7 @@ def test_run_live_accepts_candidate_id_override() -> None:
     assert run_live_args.candidate_id == "run_resume_123"
 
 
-def test_resolve_live_request_reuses_stored_request_payload(tmp_path) -> None:
+def test_resolve_live_request_reuses_stored_request_payload(tmp_path: Path) -> None:
     database_url = f"sqlite:///{tmp_path / 'truth_engine.db'}"
     upgrade_database(database_url)
     repository = TruthEngineRepository.from_database_url(database_url)

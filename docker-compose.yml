@@ -11,13 +11,11 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   temporal:
-    image: temporalio/auto-setup:1.27
-    environment:
-      DB: sqlite
+    image: temporalio/temporal:latest
+    command: server start-dev --ip 0.0.0.0
     ports:
       - "7233:7233"
       - "8233:8233"
 
 volumes:
   postgres-data:
-

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import socket
 from collections import Counter
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -13,6 +15,17 @@ from truth_engine.adapters.db.migrate import upgrade_database
 from truth_engine.adapters.db.repositories import TruthEngineRepository
 from truth_engine.cli.main import main
 from truth_engine.config.settings import Settings
+from truth_engine.contracts.fixtures import (
+    ArenaDiscoveryFixture,
+    ChannelValidationFixtureRun,
+    LandscapeResearchFixture,
+    NormalizationFixtureRun,
+    ScoringFixtureRun,
+    SignalMiningFixtureRun,
+    SkepticFixtureRun,
+    WedgeCritiqueFixtureRun,
+    WedgeDesignFixtureRun,
+)
 from truth_engine.domain.enums import AgentName, GateAction
 from truth_engine.workflows.candidate import CandidateWorkflowRunner
 
@@ -20,6 +33,12 @@ FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "workflows"
 
 
 def test_cli_run_fixture_generates_dossier_and_persists_gate_b_candidate(tmp_path: Path) -> None:
+    try:
+        with socket.create_connection(("localhost", 7233), timeout=0.2):
+            pass
+    except OSError:
+        pytest.skip("Temporal server is not running on localhost:7233")
+
     database_path = tmp_path / "truth_engine.db"
     output_dir = tmp_path / "out"
 
@@ -246,34 +265,34 @@ class _InterruptingFixtureBundle:
     def candidate_id(self) -> str:
         return self.delegate.candidate_id
 
-    def arena_discovery(self):
-        return self._call("arena_discovery")
+    def arena_discovery(self) -> ArenaDiscoveryFixture:
+        return cast(ArenaDiscoveryFixture, self._call("arena_discovery"))
 
-    def signal_mining(self, targeted_weakness: str | None = None):
-        return self._call("signal_mining", targeted_weakness)
+    def signal_mining(self, targeted_weakness: str | None = None) -> SignalMiningFixtureRun:
+        return cast(SignalMiningFixtureRun, self._call("signal_mining", targeted_weakness))
 
-    def normalization(self):
-        return self._call("normalization")
+    def normalization(self) -> NormalizationFixtureRun:
+        return cast(NormalizationFixtureRun, self._call("normalization"))
 
-    def landscape_research(self):
-        return self._call("landscape_research")
+    def landscape_research(self) -> LandscapeResearchFixture:
+        return cast(LandscapeResearchFixture, self._call("landscape_research"))
 
-    def scoring(self):
-        return self._call("scoring")
+    def scoring(self) -> ScoringFixtureRun:
+        return cast(ScoringFixtureRun, self._call("scoring"))
 
-    def skeptic(self):
-        return self._call("skeptic")
+    def skeptic(self) -> SkepticFixtureRun:
+        return cast(SkepticFixtureRun, self._call("skeptic"))
 
-    def wedge_design(self):
-        return self._call("wedge_design")
+    def wedge_design(self) -> WedgeDesignFixtureRun:
+        return cast(WedgeDesignFixtureRun, self._call("wedge_design"))
 
-    def wedge_critique(self):
-        return self._call("wedge_critique")
+    def wedge_critique(self) -> WedgeCritiqueFixtureRun:
+        return cast(WedgeCritiqueFixtureRun, self._call("wedge_critique"))
 
-    def channel_validation(self):
-        return self._call("channel_validation")
+    def channel_validation(self) -> ChannelValidationFixtureRun:
+        return cast(ChannelValidationFixtureRun, self._call("channel_validation"))
 
-    def _call(self, name: str, *args):
+    def _call(self, name: str, *args: object) -> object:
         self.calls[name] += 1
         if self.fail_on == name:
             raise RuntimeError("synthetic interruption")

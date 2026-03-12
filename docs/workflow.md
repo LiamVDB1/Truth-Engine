@@ -1,6 +1,7 @@
 # Workflow
 
-The implemented runtime executes a single candidate through stages `0-5` and stops at Gate B.
+The implemented runtime executes a single candidate through stages `0-5` under Temporal and stops
+at Gate B.
 
 ## End-to-End Flow
 
@@ -102,15 +103,17 @@ Important runtime detail:
 
 ### Fixture mode
 
-- Tool-backed persistence is replayed by the workflow runner.
-- The fixture bundle itself does not persist state.
-- This makes fixtures deterministic and suitable for integration tests.
+- Temporal activities load indexed fixture outputs from the scenario file.
+- Tool-backed persistence is replayed by the activity-side runner helpers.
+- This keeps fixture orchestration deterministic while exercising the Temporal control flow.
 
 ### Live mode
 
 - Tool-backed agents persist arenas, signals, and landscape entries as they work.
-- The workflow runner only persists non-tool outputs plus stage/cost records.
-- Live activities also carry stage-local memory such as selected arena, latest scoring result, and latest wedge proposal.
+- The Temporal workflow owns the retry/loop state and gate sequencing.
+- Activity-side runner helpers persist non-tool outputs plus stage/cost records.
+- Live activities reconstruct stage-local context such as selected arena, latest scoring result,
+  and latest wedge proposal from stored state when needed.
 
 ## Final Outcome
 
@@ -120,6 +123,8 @@ A successful run:
 - writes `./out/<candidate_id>.md`
 - writes `./out/<candidate_id>.trace.md`
 - stores pass learnings
+- records the full stage/activity history in Temporal
+- updates the Temporal workflow memo with current stage, budget mode, last decision, and artifact paths
 
 A killed run:
 - marks the candidate and selected arena as killed
@@ -129,3 +134,5 @@ A killed run:
 Current nuance:
 - kill learnings are only extracted on the Gate A kill branch
 - wedge-path kills, Gate B kills, and safety-cap kills do not currently persist learnings
+- the Temporal UI gives orchestration-level history; the markdown trace remains the place to inspect
+  compiled prompts and tool I/O

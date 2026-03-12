@@ -18,7 +18,7 @@ The most important distinction in this repository is:
 
 | Topic | Current code | Older planning docs |
 |---|---|---|
-| Orchestration | Synchronous Python runner | Temporal-first design |
+| Orchestration | Temporal workflow + activities | Temporal-first design |
 | Database | SQLAlchemy repository, SQLite-friendly, PostgreSQL-intended | PostgreSQL-first |
 | Output boundary | Gate B dossier | Full multi-stage system through commitment |
 | Live adapters | Serper, public web fetch/extract, Reddit via PRAW | Broader future scraping stack |
@@ -40,6 +40,7 @@ If you need product intent or future architecture, see [`planning/README.md`](/U
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+docker compose up -d postgres temporal
 python -m truth_engine init-db --database-url sqlite:///./truth_engine.db
 python -m truth_engine run-fixture --fixture tests/fixtures/workflows/investigate_revise_reachable.json
 ```
@@ -69,6 +70,7 @@ python -m truth_engine run-live --prompt-version live-v1
 ## Current Scope
 
 Implemented:
+- Temporal worker/runtime
 - Gate A investigation loop
 - Wedge revision loop
 - Gate B retry loop
@@ -79,7 +81,6 @@ Implemented:
 - Markdown trace output during runs
 
 Not implemented yet:
-- Temporal worker/runtime
 - Stages `6-7` outbound, conversation, and commitment execution
 - General runtime learnings injection into prompts
 - Embedding-based arena dedup

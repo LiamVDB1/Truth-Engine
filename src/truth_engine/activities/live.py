@@ -33,7 +33,7 @@ from truth_engine.contracts.stages import (
     WedgeHypothesis,
     WedgeProposal,
 )
-from truth_engine.domain.enums import AgentName, Stage, WorkflowStep
+from truth_engine.domain.enums import AgentName, Stage
 from truth_engine.prompts.builder import build_prompt
 from truth_engine.tools.runtime import RepositoryToolRuntime
 from truth_engine.tools.schemas import tool_schemas_for_agent
@@ -407,51 +407,30 @@ class LiveActivityBundle:
 
     def _require_selected_arena(self) -> EvaluatedArena:
         if self._selected_arena is None:
-            checkpoint = self.repository.load_workflow_checkpoint(
+            stage_run = self.repository.get_stage_run(
                 self.candidate_id,
-                WorkflowStep.ARENA_DISCOVERY,
+                AgentName.ARENA_EVALUATOR,
                 0,
             )
-            if checkpoint is not None:
-                arena_discovery = ArenaDiscoveryFixture.model_validate(checkpoint.payload)
-                self._selected_arena = arena_discovery.evaluation.ranked_arenas[0]
-            else:
-                stage_run = self.repository.get_stage_run(
-                    self.candidate_id,
-                    AgentName.ARENA_EVALUATOR,
-                    0,
+            raw_arenas = self.repository.load_arena_proposals(self.candidate_id)
+            if stage_run is not None and raw_arenas:
+                evaluation = _hydrate_evaluation(
+                    ArenaEvaluation.model_validate(stage_run.payload),
+                    raw_arenas,
                 )
-                raw_arenas = self.repository.load_arena_proposals(self.candidate_id)
-                if stage_run is not None and raw_arenas:
-                    evaluation = _hydrate_evaluation(
-                        ArenaEvaluation.model_validate(stage_run.payload),
-                        raw_arenas,
-                    )
-                    self._selected_arena = evaluation.ranked_arenas[0]
+                self._selected_arena = evaluation.ranked_arenas[0]
         if self._selected_arena is None:
             raise ValueError("Selected arena is not available yet.")
         return self._selected_arena
 
     def _require_landscape_report(self) -> LandscapeReport:
         if self._latest_landscape_report is None:
-            checkpoint = self.repository.load_workflow_checkpoint(
+            stage_run = self.repository.latest_stage_run(
                 self.candidate_id,
-                WorkflowStep.LANDSCAPE_RESEARCH,
-                0,
+                AgentName.LANDSCAPE_SCOUT,
             )
-            if checkpoint is not None:
-                self._latest_landscape_report = LandscapeResearchFixture.model_validate(
-                    checkpoint.payload
-                ).result
-            else:
-                stage_run = self.repository.latest_stage_run(
-                    self.candidate_id,
-                    AgentName.LANDSCAPE_SCOUT,
-                )
-                if stage_run is not None:
-                    self._latest_landscape_report = LandscapeReport.model_validate(
-                        stage_run.payload
-                    )
+            if stage_run is not None:
+                self._latest_landscape_report = LandscapeReport.model_validate(stage_run.payload)
         if self._latest_landscape_report is None:
             raise ValueError("Landscape report is not available yet.")
         return self._latest_landscape_report

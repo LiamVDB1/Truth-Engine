@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -27,16 +27,24 @@ from truth_engine.contracts.fixtures import (
     WedgeCritiqueFixtureRun,
     WedgeDesignFixtureRun,
 )
-from truth_engine.contracts.models import CostRecord, ProblemUnit
+from truth_engine.contracts.models import CostRecord, ProblemUnit, RawArena
 from truth_engine.contracts.stages import (
     ActivityMetrics,
+    ArenaEvaluation,
+    ArenaSearchResult,
     CandidateDossier,
     ChannelValidation,
     DecisionEvent,
     EvaluatedArena,
+    LandscapeReport,
+    NormalizationResult,
     ScoredCandidate,
+    ScoringResult,
+    SignalMiningResult,
     SkepticReport,
+    WedgeCritique,
     WedgeHypothesis,
+    WedgeProposal,
     WorkflowOutcome,
     wedge_verdict_for_critique,
 )
@@ -46,7 +54,6 @@ from truth_engine.domain.enums import (
     GateAction,
     SkepticRecommendation,
     Stage,
-    WorkflowStep,
 )
 from truth_engine.prompts.builder import build_prompt
 from truth_engine.services.budgets import candidate_budget_mode
@@ -64,6 +71,12 @@ from truth_engine.services.logging import (
 )
 from truth_engine.services.run_trace import RunTraceWriter
 from truth_engine.tools.runtime import RepositoryToolRuntime
+
+TStageModel = TypeVar("TStageModel", bound=BaseModel)
+
+
+class PersistsToolState(Protocol):
+    persists_tool_state: bool
 
 
 class CandidateWorkflowRunner:
@@ -127,7 +140,6 @@ class CandidateWorkflowRunner:
         try:
             selected_arena = self._checkpointed_step(
                 candidate_id=candidate_id,
-                step=WorkflowStep.ARENA_DISCOVERY,
                 attempt_index=0,
                 stage_label="Arena Discovery",
                 agent_label="arena_scout",
@@ -139,11 +151,11 @@ class CandidateWorkflowRunner:
                 ),
                 model_type=ArenaDiscoveryFixture,
                 cost_of=lambda run: run.scout_metrics.cost_eur + run.evaluator_metrics.cost_eur,
+                resume=lambda: self._resume_arena_discovery(candidate_id),
             ).evaluation.ranked_arenas[0]
 
             self._checkpointed_step(
                 candidate_id=candidate_id,
-                step=WorkflowStep.SIGNAL_MINING,
                 attempt_index=0,
                 stage_label="Signal Mining",
                 agent_label="signal_scout",
@@ -156,10 +168,10 @@ class CandidateWorkflowRunner:
                 ),
                 model_type=SignalMiningFixtureRun,
                 cost_of=lambda run: run.metrics.cost_eur,
+                resume=lambda: self._resume_signal_mining(candidate_id, 0),
             )
             self._checkpointed_step(
                 candidate_id=candidate_id,
-                step=WorkflowStep.NORMALIZATION,
                 attempt_index=0,
                 stage_label="Normalization",
                 agent_label="normalizer",
@@ -172,11 +184,11 @@ class CandidateWorkflowRunner:
                 model_type=NormalizationFixtureRun,
                 cost_of=lambda run: run.metrics.cost_eur,
                 summary=lambda run: f"{len(run.result.problem_units)} problem units",
+                resume=lambda: self._resume_normalization(candidate_id, 0),
             )
 
             self._checkpointed_step(
                 candidate_id=candidate_id,
-                step=WorkflowStep.LANDSCAPE_RESEARCH,
                 attempt_index=0,
                 stage_label="Landscape",
                 agent_label="landscape_scout",
@@ -188,6 +200,7 @@ class CandidateWorkflowRunner:
                 ),
                 model_type=LandscapeResearchFixture,
                 cost_of=lambda run: run.metrics.cost_eur,
+                resume=lambda: self._resume_landscape_research(candidate_id),
             )
 
             selected_problem_unit: ProblemUnit | None = None
@@ -196,22 +209,34 @@ class CandidateWorkflowRunner:
             gate_a_iteration = 0
             while True:
                 scoring_attempt = gate_a_iteration
+
+                def apply_scoring(
+                    run: ScoringFixtureRun,
+                    attempt_index: int = scoring_attempt,
+                ) -> None:
+                    self._apply_scoring(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    )
+
+                def resume_scoring(
+                    attempt_index: int = scoring_attempt,
+                ) -> ScoringFixtureRun | None:
+                    return self._resume_scoring(candidate_id, attempt_index)
+
                 scoring_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    step=WorkflowStep.SCORING,
                     attempt_index=scoring_attempt,
                     stage_label="Scoring",
                     agent_label="scorer",
                     execute=activities.scoring,
-                    apply=lambda run, attempt_index=scoring_attempt: self._apply_scoring(
-                        candidate_id=candidate_id,
-                        run=run,
-                        attempt_index=attempt_index,
-                    ),
+                    apply=apply_scoring,
                     model_type=ScoringFixtureRun,
                     cost_of=lambda run: run.metrics.cost_eur,
                     summary=lambda run: f"score={run.result.top_candidate.total_score}",
                     attempt=scoring_attempt,
+                    resume=resume_scoring,
                 )
                 scoring_result = scoring_run.result.top_candidate
                 selected_problem_unit = self.repository.get_problem_unit(
@@ -220,22 +245,33 @@ class CandidateWorkflowRunner:
                 if selected_problem_unit is None:
                     raise ValueError(f"Unknown problem unit: {scoring_result.problem_unit_id}")
 
+                def apply_skeptic(
+                    run: SkepticFixtureRun,
+                    attempt_index: int = scoring_attempt,
+                ) -> None:
+                    self._apply_skeptic(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    )
+
+                def resume_skeptic(
+                    attempt_index: int = scoring_attempt,
+                ) -> SkepticFixtureRun | None:
+                    return self._resume_skeptic(candidate_id, attempt_index)
+
                 skeptic_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    step=WorkflowStep.SKEPTIC,
                     attempt_index=scoring_attempt,
                     stage_label="Skeptic",
                     agent_label="skeptic",
                     execute=activities.skeptic,
-                    apply=lambda run, attempt_index=scoring_attempt: self._apply_skeptic(
-                        candidate_id=candidate_id,
-                        run=run,
-                        attempt_index=attempt_index,
-                    ),
+                    apply=apply_skeptic,
                     model_type=SkepticFixtureRun,
                     cost_of=lambda run: run.metrics.cost_eur,
                     summary=lambda run: f"rec={run.result.recommendation}",
                     attempt=scoring_attempt,
+                    resume=resume_skeptic,
                 )
                 skeptic_result = skeptic_run.result
 
@@ -272,45 +308,74 @@ class CandidateWorkflowRunner:
                 if gate_a_event.action is GateAction.INVESTIGATE:
                     targeted_attempt = gate_a_iteration + 1
                     targeted_weakness = skeptic_result.primary_weakness
-                    self._checkpointed_step(
-                        candidate_id=candidate_id,
-                        step=WorkflowStep.SIGNAL_MINING,
-                        attempt_index=targeted_attempt,
-                        stage_label="Targeted Mining",
-                        agent_label="signal_scout",
-                        execute=(
-                            lambda weakness=targeted_weakness: activities.signal_mining(weakness)
-                        ),
-                        apply=lambda run, attempt_index=targeted_attempt: self._apply_signal_mining(
+
+                    def execute_targeted_signal(
+                        weakness: str = targeted_weakness,
+                    ) -> SignalMiningFixtureRun:
+                        return activities.signal_mining(weakness)
+
+                    def apply_targeted_signal(
+                        run: SignalMiningFixtureRun,
+                        attempt_index: int = targeted_attempt,
+                    ) -> None:
+                        self._apply_signal_mining(
                             candidate_id=candidate_id,
                             run=run,
                             attempt_index=attempt_index,
                             persists_tool_state=activities.persists_tool_state,
-                        ),
+                        )
+
+                    def resume_targeted_signal(
+                        attempt_index: int = targeted_attempt,
+                        weakness: str = targeted_weakness,
+                    ) -> SignalMiningFixtureRun | None:
+                        return self._resume_signal_mining(
+                            candidate_id,
+                            attempt_index,
+                            targeted_weakness=weakness,
+                        )
+
+                    self._checkpointed_step(
+                        candidate_id=candidate_id,
+                        attempt_index=targeted_attempt,
+                        stage_label="Targeted Mining",
+                        agent_label="signal_scout",
+                        execute=execute_targeted_signal,
+                        apply=apply_targeted_signal,
                         model_type=SignalMiningFixtureRun,
                         cost_of=lambda run: run.metrics.cost_eur,
                         extra=f"weakness: {targeted_weakness}",
+                        resume=resume_targeted_signal,
                     )
+
+                    def apply_targeted_normalization(
+                        run: NormalizationFixtureRun,
+                        attempt_index: int = targeted_attempt,
+                        weakness: str = targeted_weakness,
+                    ) -> None:
+                        self._apply_normalization(
+                            candidate_id=candidate_id,
+                            run=run,
+                            attempt_index=attempt_index,
+                            targeted_weakness=weakness,
+                        )
+
+                    def resume_targeted_normalization(
+                        attempt_index: int = targeted_attempt,
+                    ) -> NormalizationFixtureRun | None:
+                        return self._resume_normalization(candidate_id, attempt_index)
+
                     self._checkpointed_step(
                         candidate_id=candidate_id,
-                        step=WorkflowStep.NORMALIZATION,
                         attempt_index=targeted_attempt,
                         stage_label="Normalization",
                         agent_label="normalizer",
                         execute=activities.normalization,
-                        apply=(
-                            lambda run,
-                            attempt_index=targeted_attempt,
-                            weakness=targeted_weakness: self._apply_normalization(
-                                candidate_id=candidate_id,
-                                run=run,
-                                attempt_index=attempt_index,
-                                targeted_weakness=weakness,
-                            )
-                        ),
+                        apply=apply_targeted_normalization,
                         model_type=NormalizationFixtureRun,
                         cost_of=lambda run: run.metrics.cost_eur,
                         summary=lambda run: f"{len(run.result.problem_units)} problem units",
+                        resume=resume_targeted_normalization,
                     )
                     gate_a_iteration += 1
                     continue
@@ -334,40 +399,63 @@ class CandidateWorkflowRunner:
             selected_wedge: WedgeHypothesis | None = None
             while True:
                 wedge_attempt = wedge_iteration
+
+                def apply_wedge_design(
+                    run: WedgeDesignFixtureRun,
+                    attempt_index: int = wedge_attempt,
+                ) -> None:
+                    self._apply_wedge_design(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    )
+
+                def resume_wedge_design(
+                    attempt_index: int = wedge_attempt,
+                ) -> WedgeDesignFixtureRun | None:
+                    return self._resume_wedge_design(candidate_id, attempt_index)
+
                 wedge_design_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    step=WorkflowStep.WEDGE_DESIGN,
                     attempt_index=wedge_attempt,
                     stage_label="Wedge Design",
                     agent_label="wedge_designer",
                     execute=activities.wedge_design,
-                    apply=lambda run, attempt_index=wedge_attempt: self._apply_wedge_design(
-                        candidate_id=candidate_id,
-                        run=run,
-                        attempt_index=attempt_index,
-                    ),
+                    apply=apply_wedge_design,
                     model_type=WedgeDesignFixtureRun,
                     cost_of=lambda run: run.metrics.cost_eur,
                     summary=lambda run: f"{len(run.result.wedges)} wedges",
                     attempt=wedge_attempt,
+                    resume=resume_wedge_design,
                 )
+
+                def apply_wedge_critique(
+                    run: WedgeCritiqueFixtureRun,
+                    attempt_index: int = wedge_attempt,
+                ) -> None:
+                    self._apply_wedge_critique(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    )
+
+                def resume_wedge_critique(
+                    attempt_index: int = wedge_attempt,
+                ) -> WedgeCritiqueFixtureRun | None:
+                    return self._resume_wedge_critique(candidate_id, attempt_index)
 
                 wedge_critique_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    step=WorkflowStep.WEDGE_CRITIQUE,
                     attempt_index=wedge_attempt,
                     stage_label="Wedge Critique",
                     agent_label="wedge_critic",
                     execute=activities.wedge_critique,
-                    apply=lambda run, attempt_index=wedge_attempt: self._apply_wedge_critique(
-                        candidate_id=candidate_id,
-                        run=run,
-                        attempt_index=attempt_index,
-                    ),
+                    apply=apply_wedge_critique,
                     model_type=WedgeCritiqueFixtureRun,
                     cost_of=lambda run: run.metrics.cost_eur,
                     summary=lambda run: f"best={run.result.best_wedge_index}",
                     attempt=wedge_attempt,
+                    resume=resume_wedge_critique,
                 )
 
                 wedge_event = self.repository.get_decision_event(
@@ -424,18 +512,29 @@ class CandidateWorkflowRunner:
             gate_b_retry_index = 0
             while True:
                 channel_attempt = gate_b_retry_index
+
+                def apply_channel_validation(
+                    run: ChannelValidationFixtureRun,
+                    attempt_index: int = channel_attempt,
+                ) -> None:
+                    self._apply_channel_validation(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    )
+
+                def resume_channel_validation(
+                    attempt_index: int = channel_attempt,
+                ) -> ChannelValidationFixtureRun | None:
+                    return self._resume_channel_validation(candidate_id, attempt_index)
+
                 channel_validation_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    step=WorkflowStep.CHANNEL_VALIDATION,
                     attempt_index=channel_attempt,
                     stage_label="Buyer/Channel",
                     agent_label="buyer_channel_validator",
                     execute=activities.channel_validation,
-                    apply=lambda run, attempt_index=channel_attempt: self._apply_channel_validation(
-                        candidate_id=candidate_id,
-                        run=run,
-                        attempt_index=attempt_index,
-                    ),
+                    apply=apply_channel_validation,
                     model_type=ChannelValidationFixtureRun,
                     cost_of=lambda run: run.metrics.cost_eur,
                     summary=lambda run: (
@@ -443,6 +542,7 @@ class CandidateWorkflowRunner:
                         f"leads={run.result.total_reachable_leads}"
                     ),
                     attempt=channel_attempt,
+                    resume=resume_channel_validation,
                 )
 
                 gate_b_event = self.repository.get_decision_event(
@@ -534,22 +634,22 @@ class CandidateWorkflowRunner:
         self,
         *,
         candidate_id: str,
-        step: WorkflowStep,
         attempt_index: int,
         stage_label: str,
         agent_label: str,
-        execute: Callable[[], BaseModel],
-        apply: Callable[[BaseModel], None],
-        model_type: type[BaseModel],
-        cost_of: Callable[[BaseModel], float],
-        summary: Callable[[BaseModel], str] | None = None,
+        execute: Callable[[], TStageModel],
+        apply: Callable[[TStageModel], None],
+        model_type: type[TStageModel],
+        cost_of: Callable[[TStageModel], float],
+        resume: Callable[[], TStageModel | None] | None = None,
+        summary: Callable[[TStageModel], str] | None = None,
         attempt: int = 0,
         extra: str = "",
-    ) -> Any:
-        checkpoint = self.repository.load_workflow_checkpoint(candidate_id, step, attempt_index)
+    ) -> TStageModel:
+        resumed = resume() if resume is not None else None
         start_extra = extra
-        if checkpoint is not None:
-            start_extra = f"{extra} | resume checkpoint".strip(" |")
+        if resumed is not None:
+            start_extra = f"{extra} | resume stage state".strip(" |")
         self._stage_start(
             candidate_id,
             stage_label,
@@ -557,25 +657,19 @@ class CandidateWorkflowRunner:
             attempt=attempt,
             extra=start_extra,
         )
-        if checkpoint is not None:
-            result = model_type.model_validate(checkpoint.payload)
+        if resumed is not None:
+            result = model_type.model_validate(resumed.model_dump(mode="json"))
             self._stage_done(
                 candidate_id,
                 stage_label,
                 agent_label,
                 cost_eur=0.0,
-                summary=(summary(result) if summary is not None else "resumed from checkpoint"),
+                summary=(summary(result) if summary is not None else "resumed from stage state"),
             )
             return result
 
         result = execute()
         apply(result)
-        self.repository.store_workflow_checkpoint(
-            candidate_id=candidate_id,
-            step=step,
-            attempt_index=attempt_index,
-            payload=result.model_dump(mode="json"),
-        )
         self._stage_done(
             candidate_id,
             stage_label,
@@ -585,11 +679,136 @@ class CandidateWorkflowRunner:
         )
         return result
 
+    def _resume_arena_discovery(self, candidate_id: str) -> ArenaDiscoveryFixture | None:
+        scout_run = self.repository.get_stage_run(candidate_id, AgentName.ARENA_SCOUT, 0)
+        evaluator_run = self.repository.get_stage_run(candidate_id, AgentName.ARENA_EVALUATOR, 0)
+        raw_arenas = self.repository.load_arena_proposals(candidate_id)
+        if scout_run is None or evaluator_run is None or not raw_arenas:
+            return None
+        evaluation = _hydrate_evaluation(
+            ArenaEvaluation.model_validate(evaluator_run.payload),
+            raw_arenas,
+        )
+        return ArenaDiscoveryFixture(
+            scout_metrics=scout_run.metrics,
+            evaluator_metrics=evaluator_run.metrics,
+            search_result=ArenaSearchResult.model_validate(scout_run.payload),
+            raw_arenas=raw_arenas,
+            evaluation=evaluation,
+        )
+
+    def _resume_signal_mining(
+        self,
+        candidate_id: str,
+        attempt_index: int,
+        *,
+        targeted_weakness: str | None = None,
+    ) -> SignalMiningFixtureRun | None:
+        stage_run = self.repository.get_stage_run(
+            candidate_id, AgentName.SIGNAL_SCOUT, attempt_index
+        )
+        if stage_run is None:
+            return None
+        return SignalMiningFixtureRun(
+            targeted_weakness=targeted_weakness,
+            metrics=stage_run.metrics,
+            result=SignalMiningResult.model_validate(stage_run.payload),
+            raw_signals=self.repository.list_raw_signals(candidate_id),
+        )
+
+    def _resume_normalization(
+        self,
+        candidate_id: str,
+        attempt_index: int,
+    ) -> NormalizationFixtureRun | None:
+        stage_run = self.repository.get_stage_run(candidate_id, AgentName.NORMALIZER, attempt_index)
+        if stage_run is None:
+            return None
+        return NormalizationFixtureRun(
+            metrics=stage_run.metrics,
+            result=NormalizationResult.model_validate(stage_run.payload),
+        )
+
+    def _resume_landscape_research(self, candidate_id: str) -> LandscapeResearchFixture | None:
+        stage_run = self.repository.get_stage_run(candidate_id, AgentName.LANDSCAPE_SCOUT, 0)
+        if stage_run is None:
+            return None
+        return LandscapeResearchFixture(
+            metrics=stage_run.metrics,
+            result=LandscapeReport.model_validate(stage_run.payload),
+            entries=self.repository.list_landscape_entries(candidate_id),
+        )
+
+    def _resume_scoring(self, candidate_id: str, attempt_index: int) -> ScoringFixtureRun | None:
+        stage_run = self.repository.get_stage_run(candidate_id, AgentName.SCORER, attempt_index)
+        if stage_run is None:
+            return None
+        return ScoringFixtureRun(
+            metrics=stage_run.metrics,
+            result=ScoringResult.model_validate(stage_run.payload),
+        )
+
+    def _resume_skeptic(self, candidate_id: str, attempt_index: int) -> SkepticFixtureRun | None:
+        stage_run = self.repository.get_stage_run(candidate_id, AgentName.SKEPTIC, attempt_index)
+        if stage_run is None:
+            return None
+        return SkepticFixtureRun(
+            metrics=stage_run.metrics,
+            result=SkepticReport.model_validate(stage_run.payload),
+        )
+
+    def _resume_wedge_design(
+        self,
+        candidate_id: str,
+        attempt_index: int,
+    ) -> WedgeDesignFixtureRun | None:
+        stage_run = self.repository.get_stage_run(
+            candidate_id, AgentName.WEDGE_DESIGNER, attempt_index
+        )
+        if stage_run is None:
+            return None
+        return WedgeDesignFixtureRun(
+            metrics=stage_run.metrics,
+            result=WedgeProposal.model_validate(stage_run.payload),
+        )
+
+    def _resume_wedge_critique(
+        self,
+        candidate_id: str,
+        attempt_index: int,
+    ) -> WedgeCritiqueFixtureRun | None:
+        stage_run = self.repository.get_stage_run(
+            candidate_id, AgentName.WEDGE_CRITIC, attempt_index
+        )
+        if stage_run is None:
+            return None
+        return WedgeCritiqueFixtureRun(
+            metrics=stage_run.metrics,
+            result=WedgeCritique.model_validate(stage_run.payload),
+        )
+
+    def _resume_channel_validation(
+        self,
+        candidate_id: str,
+        attempt_index: int,
+    ) -> ChannelValidationFixtureRun | None:
+        stage_run = self.repository.get_stage_run(
+            candidate_id,
+            AgentName.BUYER_CHANNEL_VALIDATOR,
+            attempt_index,
+        )
+        if stage_run is None:
+            return None
+        return ChannelValidationFixtureRun(
+            metrics=stage_run.metrics,
+            result=ChannelValidation.model_validate(stage_run.payload),
+        )
+
     def _apply_arena_discovery(
         self,
         *,
         candidate_id: str,
-        activities: ActivityBundle,
+        activities: PersistsToolState,
         run: ArenaDiscoveryFixture,
     ) -> None:
         if self.repository.get_stage_run(candidate_id, AgentName.ARENA_SCOUT, 0) is None:
@@ -697,7 +916,7 @@ class CandidateWorkflowRunner:
         self,
         *,
         candidate_id: str,
-        activities: ActivityBundle,
+        activities: PersistsToolState,
         run: LandscapeResearchFixture,
     ) -> None:
         if self.repository.get_stage_run(candidate_id, AgentName.LANDSCAPE_SCOUT, 0) is None:
@@ -860,9 +1079,9 @@ class CandidateWorkflowRunner:
         attempt_index: int,
         payload: BaseModel,
         metrics: ActivityMetrics,
-        context: dict[str, object],
+        context: Mapping[str, object],
     ) -> None:
-        prompt = build_prompt(agent.value, context=context, settings=self.settings)
+        prompt = build_prompt(agent.value, context=dict(context), settings=self.settings)
         model_alias = resolve_agent_model(agent, self.settings)
         self.repository.store_stage_run(
             candidate_id=candidate_id,
@@ -1067,3 +1286,19 @@ class BudgetSafetyCapExceeded(RuntimeError):
         super().__init__("Candidate exceeded the safety cap.")
         self.stage = stage
         self.attempt_index = attempt_index
+
+
+def _hydrate_evaluation(
+    evaluation: ArenaEvaluation,
+    raw_arenas: list[RawArena],
+) -> ArenaEvaluation:
+    by_fingerprint = {arena.fingerprint(): arena for arena in raw_arenas}
+    ranked: list[EvaluatedArena] = []
+    for item in evaluation.ranked_arenas:
+        arena = item.arena
+        if arena.id is None:
+            stored = by_fingerprint.get(arena.fingerprint())
+            if stored is not None:
+                arena = stored
+        ranked.append(item.model_copy(update={"arena": arena}))
+    return evaluation.model_copy(update={"ranked_arenas": ranked})

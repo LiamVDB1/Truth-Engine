@@ -4,8 +4,9 @@ Truth Engine V1 is an evidence-backed business validation engine.
 
 The current repo now supports both:
 
-- a deterministic fixture replay for testing the full Gate B workflow
-- a live provider-backed runtime for stages `0-5` through buyer/channel validation
+- a Temporal-orchestrated fixture replay for testing the full Gate B workflow
+- a Temporal-orchestrated live provider-backed runtime for stages `0-5` through buyer/channel
+  validation
 
 The v0.1 boundary is unchanged:
 
@@ -16,6 +17,9 @@ The v0.1 boundary is unchanged:
 
 ## What Works
 
+- Temporal orchestration for fixture and live runs through Gate B
+- Temporal worker command plus inline-worker execution for one-shot runs
+- Temporal Web visibility for stage/activity history and workflow state memo
 - deterministic single-candidate workflow through Gate B
 - bounded Gate A targeted-evidence loop
 - bounded wedge refinement loop
@@ -40,6 +44,7 @@ The v0.1 boundary is unchanged:
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+docker compose up -d postgres temporal
 ```
 
 Initialize a local database:
@@ -82,10 +87,17 @@ If you prefer a LiteLLM proxy/gateway, set:
 Useful runtime overrides:
 
 - `TRUTH_ENGINE_AGENT_MAX_TOOL_ROUNDS=100`
+- `TRUTH_ENGINE_TEMPORAL_HOST=localhost:7233`
+- `TRUTH_ENGINE_TEMPORAL_NAMESPACE=default`
+- `TRUTH_ENGINE_TEMPORAL_TASK_QUEUE=truth-engine`
+
+Temporal Web is available at [http://localhost:8233](http://localhost:8233) when the local
+Temporal service is running.
 
 ## Run Live
 
-`run-live` now starts Arena Discovery from system context, matching the workflow doc:
+`run-live` now submits a Temporal workflow that starts Arena Discovery from system context,
+matching the workflow doc:
 
 - `founder_constraints`
 - `past_learnings`
@@ -108,6 +120,14 @@ python -m truth_engine run-live \
   --prompt-version live-v1
 ```
 
+The default command path starts an inline Temporal worker and waits for completion. If you want a
+dedicated worker process instead:
+
+```bash
+python -m truth_engine run-worker
+python -m truth_engine run-live --no-inline-worker
+```
+
 Runtime artifacts are written to `./out` by default:
 
 - `./out/<candidate_id>.trace.md`
@@ -116,7 +136,8 @@ Runtime artifacts are written to `./out` by default:
 
 The trace file is appended while the run is active. For live runs it includes stage transitions,
 compiled prompts, assistant responses, tool calls, tool results, JSON repair attempts, and final
-artifacts.
+artifacts. Temporal Web shows the orchestration history and workflow memo; the markdown trace file
+remains the detailed prompt/tool transcript.
 
 ## Run Fixture
 

@@ -59,6 +59,13 @@ Validates:
 - safety-cap kill
 - prompt preview command output
 
+### `test_temporal_workflow.py`
+
+Validates:
+- Temporal orchestration replay for the Gate B happy path
+- artifact persistence through the Temporal workflow path
+- worker/activity registration against Temporal's embedded test server when the environment allows it
+
 ### `test_storage_and_tools.py`
 
 Validates:
@@ -80,12 +87,13 @@ Validates:
 
 Current gaps are mostly about future-state functionality or real external integrations:
 
-- no Temporal workflow/worker tests because Temporal is not wired yet
 - no real end-to-end live network tests against Serper, Reddit, or provider-backed LLMs
 - no direct unit coverage for `WebFetchClient` or `RedditSearchClient`
 - no stages `6-7` tests because outbound/conversation/commitment execution is out of scope
 - no prompt-eval harness or golden-output regression suite yet
 - limited focused coverage for migration shape, dossier formatting edge cases, and live CLI execution
+- `test_temporal_workflow.py` skips automatically when the embedded Temporal test server cannot start
+  in the current environment (for example, restricted sandboxes)
 
 ## Testing Philosophy in This Repo
 

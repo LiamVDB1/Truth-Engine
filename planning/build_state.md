@@ -6,7 +6,7 @@ Last updated: 2026-03-10
 
 - Current implementation phase: Phases 0-3 complete
 - Repo state: executable v0.1 core
-- Workflow runtime: fixture-backed candidate runner through Gate B
+- Workflow runtime: Temporal-orchestrated candidate workflow through Gate B
 
 ## MVP Boundary
 
@@ -32,8 +32,8 @@ Last updated: 2026-03-10
 ## Active Tasks
 
 - Harden live provider adapters behind the existing activity contracts
-- Add Temporal worker wiring around the deterministic workflow core
 - Add prompt evals and richer fixture coverage
+- Expand Temporal-backed operational tooling around inspection and dashboards
 
 ## Recently Completed
 
@@ -57,10 +57,14 @@ Last updated: 2026-03-10
 - Prompt builder upgraded to persist configured prompt version + prompt hash on stage runs
 - Dossier generation implemented in Markdown + JSON
 - CLI commands implemented for schema init, fixture execution, and dossier export
+- Temporal workflow implemented for fixture and live runs through Gate B
+- Temporal worker command added and run commands rewired through Temporal
+- Temporal Web visibility added via workflow history plus live memo updates
 - Integration tests added for:
   - Gate B happy path with investigate/revise/retry loops
   - Gate B retry kill path
   - degrade-mode retry suppression
+  - Temporal workflow replay
 - Local verification passing: `pytest`, `ruff check`, `mypy`, `alembic upgrade head`
 - Tools architecture added to `implementation_plan.md`
 - Prompt architecture added to `implementation_plan.md`
@@ -110,7 +114,7 @@ Last updated: 2026-03-10
 
 - No v0.1 blockers remain inside the frozen scope
 - Live provider credentials are still required before replacing fixtures with real adapters
-- Temporal worker bootstrap is still an integration task, not a product-scope blocker
+- No polished operator dashboard exists beyond Temporal Web + dossier artifacts
 
 ## Next Recommended Tasks
 

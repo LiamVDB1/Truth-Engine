@@ -126,7 +126,7 @@ class RepositoryToolRuntime:
                 "reason": str(error),
             }
 
-        result = dict(
+        result: dict[str, Any] = dict(
             self.repository.add_raw_signal(
                 candidate_id=str(payload["candidate_id"]),
                 signal=normalized_signal,

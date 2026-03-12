@@ -32,18 +32,6 @@ candidate_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
-workflow_checkpoint_table = Table(
-    "workflow_checkpoint",
-    metadata,
-    Column("id", String(255), primary_key=True),
-    Column("candidate_id", String(255), nullable=False, index=True),
-    Column("step", String(64), nullable=False),
-    Column("attempt_index", Integer, nullable=False, default=0),
-    Column("payload", JSON, nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("updated_at", DateTime(timezone=True), nullable=False),
-)
-
 agent_checkpoint_table = Table(
     "agent_checkpoint",
     metadata,

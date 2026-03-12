@@ -11,7 +11,6 @@ from sqlalchemy.engine import Connection, RowMapping
 from truth_engine.contracts.checkpoints import (
     AgentCheckpointRecord,
     CandidateStageRunRecord,
-    WorkflowCheckpoint,
 )
 from truth_engine.contracts.models import CostRecord, ProblemUnit, RawArena, RawSignal
 from truth_engine.contracts.stages import (
@@ -26,7 +25,6 @@ from truth_engine.domain.enums import (
     AgentName,
     GateAction,
     Stage,
-    WorkflowStep,
 )
 
 from .schema import (
@@ -45,7 +43,6 @@ from .schema import (
     raw_arena_table,
     raw_signal_table,
     wedge_hypothesis_table,
-    workflow_checkpoint_table,
 )
 
 
@@ -599,69 +596,6 @@ class TruthEngineRepository:
             timestamp=row["created_at"],
         )
 
-    def store_workflow_checkpoint(
-        self,
-        *,
-        candidate_id: str,
-        step: WorkflowStep,
-        attempt_index: int,
-        payload: dict[str, Any],
-    ) -> None:
-        now = _utc_now()
-        checkpoint_id = _workflow_checkpoint_id(candidate_id, step, attempt_index)
-        with self.engine.begin() as connection:
-            existing = connection.execute(
-                select(workflow_checkpoint_table.c.id).where(
-                    workflow_checkpoint_table.c.id == checkpoint_id
-                )
-            ).scalar_one_or_none()
-            if existing is None:
-                connection.execute(
-                    insert(workflow_checkpoint_table).values(
-                        id=checkpoint_id,
-                        candidate_id=candidate_id,
-                        step=step.value,
-                        attempt_index=attempt_index,
-                        payload=payload,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-                return
-            connection.execute(
-                update(workflow_checkpoint_table)
-                .where(workflow_checkpoint_table.c.id == checkpoint_id)
-                .values(payload=payload, updated_at=now)
-            )
-
-    def load_workflow_checkpoint(
-        self,
-        candidate_id: str,
-        step: WorkflowStep,
-        attempt_index: int,
-    ) -> WorkflowCheckpoint | None:
-        checkpoint_id = _workflow_checkpoint_id(candidate_id, step, attempt_index)
-        with self.engine.begin() as connection:
-            row = (
-                connection.execute(
-                    select(workflow_checkpoint_table).where(
-                        workflow_checkpoint_table.c.id == checkpoint_id
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        if row is None:
-            return None
-        return WorkflowCheckpoint(
-            candidate_id=row["candidate_id"],
-            step=WorkflowStep(row["step"]),
-            attempt_index=row["attempt_index"],
-            payload=dict(row["payload"]),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
-
     def store_stage_run(
         self,
         *,
@@ -962,10 +896,6 @@ def _stage_run_from_row(row: RowMapping) -> CandidateStageRunRecord:
         ),
         created_at=row["created_at"],
     )
-
-
-def _workflow_checkpoint_id(candidate_id: str, step: WorkflowStep, attempt_index: int) -> str:
-    return f"workflow:{candidate_id}:{step.value}:{attempt_index}"
 
 
 def _agent_checkpoint_id(

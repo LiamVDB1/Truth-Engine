@@ -122,16 +122,18 @@ def test_cost_record_captures_stage_and_agent_identity() -> None:
 
 
 def test_landscape_entry_coerces_string_strengths_and_weaknesses() -> None:
-    entry = LandscapeEntry(
-        name="OpsFlow",
-        type="competitor",
-        status="active",
-        source_url="https://example.com/opsflow",
-        what_they_do="Workflow automation for operations teams.",
-        relevance="High overlap with the problem unit.",
-        strengths="Strong funding ($112M), broad integrations; strong enterprise adoption",
-        weaknesses="Complex setup\nRequires a platform team to manage",
-        lesson_for_us="Keep implementation lightweight for smaller teams.",
+    entry = LandscapeEntry.model_validate(
+        {
+            "name": "OpsFlow",
+            "type": "competitor",
+            "status": "active",
+            "source_url": "https://example.com/opsflow",
+            "what_they_do": "Workflow automation for operations teams.",
+            "relevance": "High overlap with the problem unit.",
+            "strengths": "Strong funding ($112M), broad integrations; strong enterprise adoption",
+            "weaknesses": "Complex setup\nRequires a platform team to manage",
+            "lesson_for_us": "Keep implementation lightweight for smaller teams.",
+        }
     )
 
     assert entry.strengths == [

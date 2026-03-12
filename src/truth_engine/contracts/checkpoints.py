@@ -6,18 +6,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from truth_engine.contracts.stages import ActivityMetrics
-from truth_engine.domain.enums import AgentCheckpointStatus, AgentName, Stage, WorkflowStep
-
-
-class WorkflowCheckpoint(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    candidate_id: str
-    step: WorkflowStep
-    attempt_index: int = Field(default=0, ge=0)
-    payload: dict[str, Any]
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+from truth_engine.domain.enums import AgentCheckpointStatus, AgentName, Stage
 
 
 class CandidateStageRunRecord(BaseModel):

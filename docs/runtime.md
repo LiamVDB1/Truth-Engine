@@ -7,12 +7,15 @@ This page describes how the repo is executed today.
 | Command | Purpose |
 |---|---|
 | `python -m truth_engine init-db` | apply Alembic migrations |
-| `python -m truth_engine run-fixture --fixture <file>` | replay a deterministic scenario through Gate B |
-| `python -m truth_engine run-live` | run stages `0-5` with real LLM/tool adapters |
+| `python -m truth_engine run-fixture --fixture <file>` | submit a Temporal fixture workflow through Gate B |
+| `python -m truth_engine run-live` | submit a Temporal live workflow for stages `0-5` |
+| `python -m truth_engine run-worker` | run a dedicated Temporal worker for Truth Engine workflows |
 | `python -m truth_engine export-dossier --candidate-id <id>` | write stored dossier artifacts to disk |
 | `python -m truth_engine preview-prompt --agent <name> --context-file <json>` | print compiled prompt text |
 
 Defaults come from `Settings`, so `--database-url` and `--output-dir` are optional for the main commands.
+`run-fixture` and `run-live` start an inline worker by default; use `--no-inline-worker` when a
+separate `run-worker` process is already running.
 
 ## Configuration
 
@@ -23,6 +26,9 @@ Environment variables are loaded through `pydantic-settings` with the `TRUTH_ENG
 | Variable | Meaning |
 |---|---|
 | `TRUTH_ENGINE_DATABASE_URL` | database URL, defaulting to local PostgreSQL in settings |
+| `TRUTH_ENGINE_TEMPORAL_HOST` | Temporal frontend host, default `localhost:7233` |
+| `TRUTH_ENGINE_TEMPORAL_NAMESPACE` | Temporal namespace, default `default` |
+| `TRUTH_ENGINE_TEMPORAL_TASK_QUEUE` | Temporal task queue, default `truth-engine` |
 | `TRUTH_ENGINE_PROMPT_VERSION` | version string stamped onto compiled prompts and stage runs |
 | `TRUTH_ENGINE_LOG_LEVEL` | not read by `Settings`; the CLI takes `--log-level` instead |
 | `TRUTH_ENGINE_AGENT_MAX_TOOL_ROUNDS` | max tool-using LLM rounds per agent |
@@ -168,9 +174,24 @@ The trace writer appends:
 - JSON repair attempts
 - final outcome and generated artifact paths
 
+### Temporal Web
+
+When the local Temporal service is running, Temporal Web is available at
+[http://localhost:8233](http://localhost:8233).
+
+Temporal Web shows:
+- workflow execution history
+- activity boundaries, retries, and durations
+- live workflow memo updates including current stage, budget mode, last decision, trace path, and
+  dossier paths
+
+The markdown trace file remains the high-detail record for compiled prompts, tool calls, and tool
+results.
+
 ## Operational Caveats
 
 - `run-live` starts from founder constraints only; it does not accept operator briefs or seed arenas.
 - `LiveActivityBundle` currently caps itself at 6 arena proposals and 60 raw signals.
 - `WebFetchClient.extract_content(...)` refetches the URL rather than extracting from a previously fetched response.
-- The Temporal docker service and `TRUTH_ENGINE_TEMPORAL_HOST` setting are present, but the current runtime never talks to Temporal.
+- `run-fixture` and `run-live` now require a reachable Temporal service. The local
+  `docker compose up -d temporal` path is the expected dev setup.

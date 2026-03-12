@@ -1,25 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
-from truth_engine.activities.fixtures import FixtureActivityBundle
-from truth_engine.activities.live import LiveActivityBundle
 from truth_engine.adapters.db.migrate import upgrade_database
 from truth_engine.adapters.db.repositories import TruthEngineRepository
-from truth_engine.adapters.llm.litellm_runner import LiteLLMAgentRunner
-from truth_engine.adapters.reddit.praw_client import RedditSearchClient
-from truth_engine.adapters.scraping.web import WebFetchClient
-from truth_engine.adapters.search.serper import SerperSearchClient
 from truth_engine.config.settings import Settings
+from truth_engine.contracts.fixtures import FixtureScenario
 from truth_engine.contracts.live import LiveRunRequest
+from truth_engine.contracts.temporal import TruthEngineRunInput
 from truth_engine.prompts.builder import build_prompt
 from truth_engine.reporting.dossier import write_dossier_artifacts
 from truth_engine.services.logging import configure_logging
-from truth_engine.services.run_trace import RunTraceWriter
-from truth_engine.tools.runtime import RepositoryToolRuntime
-from truth_engine.workflows.candidate import CandidateWorkflowRunner
+from truth_engine.temporal.runtime import execute_truth_engine_run, run_worker
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,27 +33,29 @@ def main(argv: list[str] | None = None) -> int:
             prompt_version=args.prompt_version,
         )
         upgrade_database(settings.database_url)
-        repository = TruthEngineRepository.from_database_url(settings.database_url)
-        fixture_activities = FixtureActivityBundle.from_path(Path(args.fixture))
-        trace_writer = RunTraceWriter.create(
-            output_dir=Path(args.output_dir),
-            candidate_id=fixture_activities.candidate_id,
+        candidate_id = FixtureScenario.from_path(Path(args.fixture)).candidate_id
+        run_input = TruthEngineRunInput(
             mode="fixture",
+            candidate_id=candidate_id,
+            database_url=settings.database_url,
+            output_dir=args.output_dir,
             prompt_version=settings.prompt_version,
+            fixture_path=args.fixture,
         )
-        runner = CandidateWorkflowRunner(
-            repository=repository,
-            settings=settings,
-            trace_writer=trace_writer,
-        )
-        outcome = runner.run(fixture_activities)
-        if outcome.dossier is not None:
-            json_path, markdown_path = write_dossier_artifacts(
-                outcome.dossier, Path(args.output_dir)
+        wait_for_result = not args.no_wait
+        inline_worker = False if args.no_wait else not args.no_inline_worker
+        result = asyncio.run(
+            execute_truth_engine_run(
+                settings,
+                run_input,
+                inline_worker=inline_worker,
+                wait_for_result=wait_for_result,
             )
-            trace_writer.artifact(label="dossier_json", path=json_path)
-            trace_writer.artifact(label="dossier_markdown", path=markdown_path)
-        print(f"{outcome.candidate_id}: {outcome.status}")
+        )
+        if isinstance(result, str):
+            print(f"Submitted workflow {result} for {candidate_id}")
+            return 0
+        print(f"{result.candidate_id}: {result.status}")
         return 0
 
     if args.command == "run-live":
@@ -69,39 +66,38 @@ def main(argv: list[str] | None = None) -> int:
         )
         upgrade_database(settings.database_url)
         repository = TruthEngineRepository.from_database_url(settings.database_url)
-        tool_runtime = _build_live_tool_runtime(repository, settings)
         request = _resolve_live_request(args, repository)
-        trace_writer = RunTraceWriter.create(
-            output_dir=Path(args.output_dir),
-            candidate_id=request.candidate_id,
+        run_input = TruthEngineRunInput(
             mode="live",
+            candidate_id=request.candidate_id,
+            database_url=settings.database_url,
+            output_dir=args.output_dir,
             prompt_version=settings.prompt_version,
+            request_payload=request.model_dump(mode="json"),
         )
-        live_activities = LiveActivityBundle(
-            request=request,
-            repository=repository,
-            settings=settings,
-            agent_runner=LiteLLMAgentRunner(
-                settings=settings,
-                repository=repository,
-                trace_writer=trace_writer,
-            ),
-            tool_runtime=tool_runtime,
-        )
-        runner = CandidateWorkflowRunner(
-            repository=repository,
-            settings=settings,
-            tool_runtime=tool_runtime,
-            trace_writer=trace_writer,
-        )
-        outcome = runner.run(live_activities)
-        if outcome.dossier is not None:
-            json_path, markdown_path = write_dossier_artifacts(
-                outcome.dossier, Path(args.output_dir)
+        wait_for_result = not args.no_wait
+        inline_worker = False if args.no_wait else not args.no_inline_worker
+        result = asyncio.run(
+            execute_truth_engine_run(
+                settings,
+                run_input,
+                inline_worker=inline_worker,
+                wait_for_result=wait_for_result,
             )
-            trace_writer.artifact(label="dossier_json", path=json_path)
-            trace_writer.artifact(label="dossier_markdown", path=markdown_path)
-        print(f"{outcome.candidate_id}: {outcome.status}")
+        )
+        if isinstance(result, str):
+            print(f"Submitted workflow {result} for {request.candidate_id}")
+            return 0
+        print(f"{result.candidate_id}: {result.status}")
+        return 0
+
+    if args.command == "run-worker":
+        configure_logging(getattr(args, "log_level", "INFO"))
+        settings = Settings(
+            database_url=args.database_url,
+            prompt_version=args.prompt_version,
+        )
+        asyncio.run(run_worker(settings))
         return 0
 
     if args.command == "export-dossier":
@@ -145,6 +141,8 @@ def _build_parser() -> argparse.ArgumentParser:
     run_fixture.add_argument("--output-dir", default="./out")
     run_fixture.add_argument("--prompt-version", default="live-v1")
     run_fixture.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
+    run_fixture.add_argument("--no-inline-worker", action="store_true")
+    run_fixture.add_argument("--no-wait", action="store_true")
 
     run_live = subparsers.add_parser("run-live")
     run_live.add_argument("--request-file")
@@ -153,6 +151,17 @@ def _build_parser() -> argparse.ArgumentParser:
     run_live.add_argument("--output-dir", default="./out")
     run_live.add_argument("--prompt-version", default="live-v1")
     run_live.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
+    run_live.add_argument("--no-inline-worker", action="store_true")
+    run_live.add_argument("--no-wait", action="store_true")
+
+    run_worker_parser = subparsers.add_parser("run-worker")
+    run_worker_parser.add_argument("--database-url", default=default_settings.database_url)
+    run_worker_parser.add_argument("--prompt-version", default="live-v1")
+    run_worker_parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING"],
+    )
 
     export_dossier = subparsers.add_parser("export-dossier")
     export_dossier.add_argument("--candidate-id", required=True)
@@ -165,22 +174,6 @@ def _build_parser() -> argparse.ArgumentParser:
     preview_prompt.add_argument("--prompt-version", default="live-v1")
 
     return parser
-
-
-def _build_live_tool_runtime(
-    repository: TruthEngineRepository,
-    settings: Settings,
-) -> RepositoryToolRuntime:
-    fetch_client = WebFetchClient(settings)
-    search_client = SerperSearchClient(settings) if settings.has_serper_search() else None
-    reddit_client = RedditSearchClient(settings) if settings.has_reddit_tools() else None
-    return RepositoryToolRuntime(
-        repository,
-        search_client=search_client,
-        page_fetcher=fetch_client,
-        content_extractor=fetch_client,
-        reddit_client=reddit_client,
-    )
 
 
 def _resolve_live_request(

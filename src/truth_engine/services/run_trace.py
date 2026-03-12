@@ -18,6 +18,7 @@ class RunTraceWriter:
         mode: str,
         prompt_version: str,
         char_limit: int = 6000,
+        initialize: bool = True,
     ):
         self.path = path
         self.candidate_id = candidate_id
@@ -26,7 +27,8 @@ class RunTraceWriter:
         self.char_limit = char_limit
         self._lock = Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(self._header(), encoding="utf-8")
+        if initialize:
+            self.path.write_text(self._header(), encoding="utf-8")
 
     @classmethod
     def create(
@@ -37,11 +39,13 @@ class RunTraceWriter:
         mode: str,
         prompt_version: str,
     ) -> RunTraceWriter:
+        path = output_dir / f"{candidate_id}.trace.md"
         return cls(
-            output_dir / f"{candidate_id}.trace.md",
+            path,
             candidate_id=candidate_id,
             mode=mode,
             prompt_version=prompt_version,
+            initialize=not path.exists(),
         )
 
     def stage_start(
