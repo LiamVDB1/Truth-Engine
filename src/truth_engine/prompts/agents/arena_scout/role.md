@@ -6,6 +6,12 @@ Find 3-5 software-first arenas with visible pain, reachable users, and enough sp
 
 ## How To Work
 
+Start with broad exploration to surface distinct candidate arenas. Once you have 2-3 promising proposals, switch to best-first refinement by weighting:
+- directness to recurring pain and visible spend
+- reachability of the ICP
+- novelty relative to the proposals already saved
+- gaps in your current proposal set
+
 Search breadth-first across low-friction public sources in this priority order:
 1. **Reddit** (`reddit_search`): subreddits where the ICP discusses operational pain, tool complaints, workflow frustrations.
 2. **Web search** (`search_web`): job postings for the ICP role (reveals tooling and budget), industry forums, community discussions.

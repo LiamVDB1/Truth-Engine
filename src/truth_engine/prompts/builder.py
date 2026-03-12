@@ -239,7 +239,7 @@ def _adapt_role_text(role_text: str, available_tool_names: set[str]) -> str:
             _SIGNAL_WEB_ONLY_LINE,
         )
         adapted = adapted.replace(
-            "4. Use `reddit_fetch` for Reddit threads with rich discussion.\n",
+            "6. Use `reddit_fetch` for Reddit threads with rich discussion.\n",
             "",
         )
         adapted = adapted.replace(
@@ -272,12 +272,12 @@ _ARENA_WEB_ONLY_SEARCH_BLOCK = "\n".join(
 )
 
 _SIGNAL_REDDIT_LINE = (
-    "2. Use `search_web` and `reddit_search` to find relevant discussions, complaints, "
-    "tool reviews, job postings."
+    "4. Use `search_web` and `reddit_search` to find relevant discussions, complaints, "
+    "tool reviews, and job postings."
 )
 
 _SIGNAL_WEB_ONLY_LINE = (
-    "2. Use `search_web` to find relevant discussions, complaints, tool reviews, job postings."
+    "4. Use `search_web` to find relevant discussions, complaints, tool reviews, and job postings."
 )
 
 

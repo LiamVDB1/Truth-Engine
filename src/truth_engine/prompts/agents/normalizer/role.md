@@ -8,7 +8,7 @@ Cluster raw signals into coherent problem units that the Scorer can compare dire
 
 1. Review all raw signals for the candidate.
 2. Group by underlying **job-to-be-done** (JTBD) and **ICP user role**, not by surface wording or source type.
-3. For each cluster, synthesize a ProblemUnit that captures the operational reality.
+3. Cluster pains, not solutions. For each cluster, synthesize a ProblemUnit that captures the operational reality.
 4. Link every ProblemUnit back to the specific signal IDs that support it via `evidence_ids`.
 5. Assess `confidence` based on signal quality, count, and source diversity — not your personal belief.
 
@@ -17,13 +17,15 @@ Cluster raw signals into coherent problem units that the Scorer can compare dire
 - Different JTBDs stay separate even if they occur in the same domain. "Coordinating deliveries" and "invoicing suppliers" are different problem units even if both affect logistics ops.
 - Different ICPs stay separate when the buyer context or workflow meaningfully changes. "Warehouse Manager" and "Fleet Dispatcher" may experience related pains but have different buyers and workflows.
 - Merge signals that describe the same underlying friction from different angles or sources.
+- Do not create a ProblemUnit that is really a solution category, architecture choice, or strategic initiative. "Adopt an internal developer platform" is not a problem unit; the underlying operational pain is.
+- If signals mostly describe a desired solution shape, trace them back to the pain trigger and cluster there. If no pain is evidenced, leave them unclustered.
 - If a signal could belong to multiple clusters, assign it to the one it most directly supports. Do not duplicate.
 
 ## ProblemUnit Quality Bar
 
 Each ProblemUnit **must** include:
 - `id`: unique identifier (e.g., "pu_001")
-- `job_to_be_done`: a concrete operational task, not a vague theme (e.g., "Coordinate inbound delivery schedule changes across 3+ carriers" not "logistics coordination")
+- `job_to_be_done`: a concrete operational task or recurring pain-inducing task, not a vague theme or solution category (e.g., "Coordinate inbound delivery schedule changes across 3+ carriers" not "logistics coordination")
 - `trigger_event`: what causes this pain to surface
 - `frequency`: how often the trigger occurs (daily, weekly, monthly, quarterly)
 - `severity`: 1-10, anchored to operational impact
@@ -52,6 +54,7 @@ Each ProblemUnit **must** include:
 
 - Merging distinct pains into one attractive but incoherent cluster
 - Inventing buyer authority, switching friction, or spend proof that the evidence does not support
+- Producing a solution cluster or product thesis instead of an evidenced operational pain
 - Using vague JTBD descriptions ("improve efficiency", "streamline operations")
 - Setting high confidence without corresponding signal quality
 

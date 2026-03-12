@@ -28,6 +28,58 @@ class _FakeCompletionSequence:
         return self._responses.pop(0)
 
 
+class _FakeLiteLLMModule:
+    def __init__(
+        self,
+        *,
+        supports_response_schema: bool = False,
+        response_cost: float = 0.0,
+        completion_cost: float = 0.0,
+    ) -> None:
+        self.suppress_debug_info = False
+        self.turn_off_message_logging = False
+        self._supports_response_schema = supports_response_schema
+        self._response_cost = response_cost
+        self._completion_cost = completion_cost
+
+    def supports_response_schema(
+        self,
+        model: str,
+        custom_llm_provider: str | None = None,
+    ) -> bool:
+        del model, custom_llm_provider
+        return self._supports_response_schema
+
+    def get_llm_provider(
+        self,
+        model: str,
+        custom_llm_provider: str | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        litellm_params: Any | None = None,
+    ) -> tuple[str, str, None, None]:
+        del api_base, api_key, litellm_params
+        return model, custom_llm_provider or "openai", None, None
+
+    def response_cost_calculator(self, **_kwargs: Any) -> float:
+        return self._response_cost
+
+    def completion_cost(self, **_kwargs: Any) -> float:
+        return self._completion_cost
+
+
+class _ResponseFormatRejectingCompletion:
+    def __init__(self, response: dict[str, Any]) -> None:
+        self.response = response
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(copy.deepcopy(kwargs))
+        if len(self.calls) == 1 and "response_format" in kwargs:
+            raise ValueError("response_format is not supported for this model")
+        return self.response
+
+
 def _reset_truth_engine_logger() -> None:
     logger = logging.getLogger("truth_engine")
     for handler in list(logger.handlers):
@@ -207,6 +259,133 @@ def test_litellm_runner_uses_proxy_mode_for_alias_models() -> None:
     assert len(proxy_completion.calls) == 1
 
 
+def test_litellm_runner_uses_json_schema_response_format_for_no_tool_agents() -> None:
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Structured output worked."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 3},
+            }
+        ]
+    )
+    fake_module = _FakeLiteLLMModule(supports_response_schema=True)
+    with patch.dict("sys.modules", {"litellm": fake_module}):
+        runner = LiteLLMAgentRunner(
+            settings=Settings(tier1_model="openai/gpt-4.1-mini"),
+            completion_fn=completion,
+        )
+
+        execution = runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=PromptBundle(
+                system_prompt="system",
+                user_prompt="user",
+                prompt_version="v-test",
+                prompt_hash="abc123",
+            ),
+            response_model=ArenaSearchResult,
+            tools=None,
+            tool_executor=None,
+        )
+
+    assert execution.result.search_summary == "Structured output worked."
+    assert completion.calls[0]["response_format"]["type"] == "json_schema"
+    assert completion.calls[0]["response_format"]["json_schema"]["name"] == "ArenaSearchResult"
+
+
+def test_litellm_runner_falls_back_when_response_format_is_rejected() -> None:
+    completion = _ResponseFormatRejectingCompletion(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            '{"sources_searched":["serper"],'
+                            '"search_summary":"Fallback path worked."}'
+                        ),
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 3},
+        }
+    )
+    fake_module = _FakeLiteLLMModule(supports_response_schema=True)
+    with patch.dict("sys.modules", {"litellm": fake_module}):
+        runner = LiteLLMAgentRunner(
+            settings=Settings(tier1_model="openai/gpt-4.1-mini"),
+            completion_fn=completion,
+        )
+
+        execution = runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=PromptBundle(
+                system_prompt="system",
+                user_prompt="user",
+                prompt_version="v-test",
+                prompt_hash="abc123",
+            ),
+            response_model=ArenaSearchResult,
+            tools=None,
+            tool_executor=None,
+        )
+
+    assert execution.result.search_summary == "Fallback path worked."
+    assert "response_format" in completion.calls[0]
+    assert "response_format" not in completion.calls[1]
+
+
+def test_litellm_runner_prefers_response_cost_before_completion_cost() -> None:
+    fake_module = _FakeLiteLLMModule(
+        supports_response_schema=False,
+        response_cost=0.12,
+        completion_cost=0.34,
+    )
+    with patch.dict("sys.modules", {"litellm": fake_module}):
+        runner = LiteLLMAgentRunner(
+            settings=Settings(),
+            completion_fn=lambda **_kwargs: {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Cost path worked."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+        execution = runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=PromptBundle(
+                system_prompt="system",
+                user_prompt="user",
+                prompt_version="v-test",
+                prompt_hash="abc123",
+            ),
+            response_model=ArenaSearchResult,
+            tools=None,
+            tool_executor=None,
+        )
+
+    assert execution.metrics.cost_eur == 0.12
+
+
 def test_litellm_runner_forces_finalization_after_tool_budget() -> None:
     completion = _FakeCompletionSequence(
         [
@@ -338,6 +517,7 @@ def test_litellm_runner_requires_persistence_tool_before_finalizing() -> None:
         ]
     )
     observed_tools: list[str] = []
+
     def execute_tool(name: str, _arguments: dict[str, Any]) -> dict[str, str]:
         observed_tools.append(name)
         return {"status": "ok"}
@@ -365,6 +545,131 @@ def test_litellm_runner_requires_persistence_tool_before_finalizing() -> None:
     assert execution.result.search_summary == "Persisted the arena."
     assert observed_tools == ["create_arena_proposal"]
     assert "must call these required tool(s)" in completion.calls[1]["messages"][-1]["content"]
+
+
+def test_litellm_runner_reminds_when_required_tool_is_missing_mid_run() -> None:
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "search_web",
+                                        "arguments": '{"query":"ops pain","limit":1}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_2",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "search_web",
+                                        "arguments": '{"query":"switching pain","limit":1}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 4},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_3",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "create_arena_proposal",
+                                        "arguments": (
+                                            '{"candidate_id":"cand_123",'
+                                            '"arena":{"domain":"Returns Ops",'
+                                            '"icp_user_role":"Ops Lead",'
+                                            '"icp_buyer_role":"Head of Ops",'
+                                            '"geo":"EU/US",'
+                                            '"channel_surface":["linkedin"],'
+                                            '"solution_modality":"software",'
+                                            '"market_signals":["complaints"],'
+                                            '"signal_sources":["reddit"],'
+                                            '"market_size_signal":"large",'
+                                            '"expected_sales_cycle":"30-60 days",'
+                                            '"rationale":"Good fit"}}'
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 5},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Persisted after reminder."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 6},
+            },
+        ]
+    )
+    runner = LiteLLMAgentRunner(
+        settings=Settings(
+            agent_max_tool_rounds=4,
+            required_tool_reminder_interval=2,
+        ),
+        completion_fn=completion,
+        cost_calculator=lambda _response, _model: 0.0,
+    )
+
+    execution = runner.run(
+        agent=AgentName.ARENA_SCOUT,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+        tool_executor=lambda _name, _arguments: {"status": "ok"},
+        required_tool_names={"create_arena_proposal"},
+    )
+
+    assert execution.result.search_summary == "Persisted after reminder."
+    assert (
+        "without calling the required persistence tool"
+        in completion.calls[2]["messages"][-1]["content"]
+    )
 
 
 def test_litellm_runner_suppresses_litellm_debug_info() -> None:

@@ -229,6 +229,23 @@ class RunTraceWriter:
             ]
         )
 
+    def required_tool_reminder(
+        self,
+        *,
+        agent: str,
+        missing_tools: list[str],
+        tool_rounds_used: int,
+    ) -> None:
+        self._append_lines(
+            [
+                self._event_heading("Required Tool Reminder"),
+                f"- agent: `{agent}`",
+                f"- tool_rounds_used: `{tool_rounds_used}`",
+                f"- missing_tools: `{', '.join(missing_tools)}`",
+                "- reason: The agent is still exploring without persisting a required record.",
+            ]
+        )
+
     def error(self, *, stage: str, error: BaseException) -> None:
         self._append_lines(
             [

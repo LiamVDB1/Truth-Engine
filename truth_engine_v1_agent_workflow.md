@@ -213,9 +213,11 @@ Mine raw pain, spend, and behavior signals from the arena's target sources. Outp
 | Job postings | 0.50 | Direct signal of org spending and pain |
 | GitHub issues | 0.30 | Developer-biased, narrow population |
 | Forum posts | 0.40 | Varies by community quality |
+| Blog posts | 0.35 | Useful directional context, but often seller- or author-biased |
 | YouTube comments | 0.30 | Low signal-to-noise |
 | App store reviews | 0.40 | Consumer-biased but honest |
 | News/funding announcements | 0.45 | Market-level signal, not individual pain |
+| Documentation/product docs | 0.30 | Confirms workflow/current workaround, not direct pain |
 
 **V1 priority sources:** Pick the 3 highest-signal, easiest-to-access sources per arena. Don't try to scrape everything. Likely first picks: Reddit + G2/Capterra + job postings.
 
@@ -246,14 +248,14 @@ SignalMiningResult:
 **RawSignal schema (used in `add_signal`):**
 ```
 RawSignal:
-  source_type: str                # reddit, g2_review, job_post, github_issue, forum, youtube, app_review
+  source_type: str                # reddit, review_site, job_posting, github_issue, forum, blog, news, documentation, youtube, app_review
   source_url: str
   source_url_hash: str            # for dedup table (auto-computed by tool if not provided)
   verbatim_quote: str             # exact text from source
   persona: str | null             # inferred role/title of the person
   inferred_pain: str              # one-line pain description
   inferred_frequency: str         # daily, weekly, monthly, event-driven, unknown
-  proof_of_spend: bool            # does this signal indicate money is already being spent?
+  proof_of_spend: bool            # only true when the source explicitly indicates paid tooling, hired labor, contractors, or budget
   switching_signal: bool          # does this signal indicate desire/intent to switch tools?
   tags: list[str]                 # for clustering
   reliability_score: float        # auto-capped per source type by tool

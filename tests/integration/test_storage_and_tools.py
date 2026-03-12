@@ -18,6 +18,7 @@ def test_repository_tool_runtime_rejects_unauthorized_tools_and_dedups_urls(
     database_url = f"sqlite:///{tmp_path / 'truth_engine.db'}"
     upgrade_database(database_url)
     repository = TruthEngineRepository.from_database_url(database_url)
+    repository.create_schema()
     repository.create_candidate(candidate_id="cand_tools", status="running")
     runtime = RepositoryToolRuntime(repository=repository)
 
@@ -90,6 +91,7 @@ def test_killed_arena_fingerprint_blocks_reproposal(tmp_path: Path) -> None:
     database_url = f"sqlite:///{tmp_path / 'truth_engine.db'}"
     upgrade_database(database_url)
     repository = TruthEngineRepository.from_database_url(database_url)
+    repository.create_schema()
     repository.create_candidate(candidate_id="cand_dead", status="running")
 
     created = repository.add_arena_proposal(
@@ -134,3 +136,85 @@ def test_killed_arena_fingerprint_blocks_reproposal(tmp_path: Path) -> None:
     )
 
     assert blocked["status"] == "blocked"
+
+
+def test_add_signal_normalizes_source_type_caps_reliability_and_spend(tmp_path: Path) -> None:
+    from truth_engine.adapters.db.migrate import upgrade_database
+    from truth_engine.adapters.db.repositories import TruthEngineRepository
+    from truth_engine.tools.runtime import RepositoryToolRuntime
+
+    database_url = f"sqlite:///{tmp_path / 'truth_engine.db'}"
+    upgrade_database(database_url)
+    repository = TruthEngineRepository.from_database_url(database_url)
+    repository.create_schema()
+    repository.create_candidate(candidate_id="cand_signal_norm", status="running")
+    runtime = RepositoryToolRuntime(repository=repository)
+
+    result = runtime.invoke(
+        AgentName.SIGNAL_SCOUT,
+        "add_signal",
+        {
+            "candidate_id": "cand_signal_norm",
+            "signal": {
+                "id": "sig_blog_1",
+                "source_type": "job_post",
+                "source_url": "https://example.com/jobs/123",
+                "verbatim_quote": "Teams lose hours each week coordinating exceptions by hand.",
+                "persona": "Operations manager",
+                "inferred_pain": "Manual exception handling is slow.",
+                "inferred_frequency": "weekly",
+                "proof_of_spend": True,
+                "switching_signal": False,
+                "tags": ["coordination"],
+                "reliability_score": 0.9,
+            },
+        },
+    )
+
+    stored_signal = repository.list_raw_signals("cand_signal_norm")[0]
+
+    assert result["status"] == "created"
+    assert result["applied_source_type"] == "job_posting"
+    assert result["applied_reliability_score"] == 0.5
+    assert result["proof_of_spend"] is False
+    assert len(result["warnings"]) == 3
+    assert stored_signal.source_type == "job_posting"
+    assert stored_signal.reliability_score == 0.5
+    assert stored_signal.proof_of_spend is False
+
+
+def test_add_landscape_entry_returns_invalid_instead_of_crashing_on_schema_errors(
+    tmp_path: Path,
+) -> None:
+    from truth_engine.adapters.db.migrate import upgrade_database
+    from truth_engine.adapters.db.repositories import TruthEngineRepository
+    from truth_engine.tools.runtime import RepositoryToolRuntime
+
+    database_url = f"sqlite:///{tmp_path / 'truth_engine.db'}"
+    upgrade_database(database_url)
+    repository = TruthEngineRepository.from_database_url(database_url)
+    repository.create_schema()
+    repository.create_candidate(candidate_id="cand_landscape", status="running")
+    runtime = RepositoryToolRuntime(repository=repository)
+
+    result = runtime.invoke(
+        AgentName.LANDSCAPE_SCOUT,
+        "add_landscape_entry",
+        {
+            "candidate_id": "cand_landscape",
+            "entry": {
+                "name": "ExampleCo",
+                "type": "active_competitor",
+                "status": "active",
+                "source_url": "https://example.com",
+                "what_they_do": "Workflow automation for logistics teams.",
+                "relevance": "direct_competitor",
+                "strengths": "Fast onboarding",
+                "weaknesses": "Thin analytics",
+                "lesson_for_us": "Position around deeper exception handling.",
+            },
+        },
+    )
+
+    assert result["status"] == "invalid"
+    assert "strengths" in result["reason"]

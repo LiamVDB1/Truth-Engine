@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     llm_max_retries: int = Field(default=2, ge=0)
     agent_max_tool_rounds: int = Field(default=100, ge=1, le=200)
+    required_tool_reminder_interval: int = Field(default=10, ge=1, le=50)
+    enable_response_schema: bool = True
     tool_result_char_limit: int = Field(default=4000, ge=500, le=20000)
     page_content_char_limit: int = Field(default=12000, ge=1000, le=50000)
     serper_api_key: SecretStr | None = Field(default=None)

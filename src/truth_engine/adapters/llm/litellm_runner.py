@@ -41,6 +41,7 @@ class LiteLLMAgentRunner:
         self._proxy_completion_fn = proxy_completion_fn
         self._cost_calculator = cost_calculator
         self.trace_writer = trace_writer
+        self._response_schema_support_cache: dict[str, bool] = {}
 
     def run(
         self,
@@ -98,17 +99,22 @@ class LiteLLMAgentRunner:
                     tool_choice=tool_choice,
                     tool_names=_tool_names(tools),
                 )
-            response = self._completion(model)(
+            request_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "temperature": self.settings.llm_temperature,
+                "max_retries": self.settings.llm_max_retries,
+            }
+            response = self._request_completion(
                 model=model,
-                messages=messages,
-                tools=tools,
-                tool_choice=tool_choice,
-                temperature=self.settings.llm_temperature,
-                max_retries=self.settings.llm_max_retries,
+                request_kwargs=request_kwargs,
+                response_model=response_model,
             )
             input_tokens += int(_usage_value(response, "prompt_tokens"))
             output_tokens += int(_usage_value(response, "completion_tokens"))
-            round_cost = self._completion_cost(response, model)
+            round_cost = self._completion_cost(response, model, request_kwargs)
             cost_eur += round_cost
 
             message = _choice_message(response)
@@ -190,6 +196,31 @@ class LiteLLMAgentRunner:
                             "tool_call_id": tool_call["id"],
                             "name": tool_name,
                             "content": json.dumps(tool_result, ensure_ascii=True),
+                        }
+                    )
+                missing_required_tools = sorted(required_tools - executed_tool_names)
+                if (
+                    missing_required_tools
+                    and tool_rounds_used < self.settings.agent_max_tool_rounds
+                    and tool_rounds_used % self.settings.required_tool_reminder_interval == 0
+                ):
+                    if self.trace_writer is not None:
+                        self.trace_writer.required_tool_reminder(
+                            agent=agent.value,
+                            missing_tools=missing_required_tools,
+                            tool_rounds_used=tool_rounds_used,
+                        )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"You have used {tool_rounds_used} tool rounds without calling "
+                                "the required persistence tool(s): "
+                                f"{', '.join(missing_required_tools)}. "
+                                "Persist the strongest qualifying finding now. "
+                                "Keep exploring only when it directly improves coverage or "
+                                "fills a known evidence gap."
+                            ),
                         }
                     )
                 debug_llm_call(
@@ -329,16 +360,106 @@ class LiteLLMAgentRunner:
 
         return call_proxy
 
-    def _completion_cost(self, response: Any, model: str) -> float:
+    def _request_completion[TResponse: BaseModel](
+        self,
+        *,
+        model: str,
+        request_kwargs: dict[str, Any],
+        response_model: type[TResponse],
+    ) -> Any:
+        completion = self._completion(model)
+        if not self._should_attempt_response_schema(model, request_kwargs):
+            return completion(**request_kwargs)
+
+        schema_kwargs = dict(request_kwargs)
+        schema_kwargs["response_format"] = _response_format_for_model(response_model)
+        try:
+            response = completion(**schema_kwargs)
+            self._response_schema_support_cache[model] = True
+            return response
+        except Exception as error:
+            if not _looks_like_response_schema_support_error(error):
+                raise
+            self._response_schema_support_cache[model] = False
+            return completion(**request_kwargs)
+
+    def _should_attempt_response_schema(
+        self,
+        model: str,
+        request_kwargs: dict[str, Any],
+    ) -> bool:
+        if not self.settings.enable_response_schema:
+            return False
+        tools = request_kwargs.get("tools")
+        tool_choice = request_kwargs.get("tool_choice")
+        if tools is not None and tool_choice == "auto":
+            return False
+        cached_support = self._response_schema_support_cache.get(model)
+        if cached_support is not None:
+            return cached_support
+        if self._should_use_proxy_mode(model):
+            return True
+        _configure_litellm_runtime()
+        try:
+            from litellm import get_llm_provider, supports_response_schema
+        except ImportError:
+            return False
+        provider: str | None = None
+        try:
+            _, provider, _, _ = get_llm_provider(
+                model=model,
+                api_base=self.settings.litellm_api_base,
+            )
+        except Exception:
+            provider = None
+        try:
+            supported = bool(supports_response_schema(model=model, custom_llm_provider=provider))
+            self._response_schema_support_cache[model] = supported
+            return supported
+        except Exception:
+            return False
+
+    def _completion_cost(self, response: Any, model: str, request_kwargs: dict[str, Any]) -> float:
         if self._cost_calculator is not None:
             return self._cost_calculator(response, model)
         _configure_litellm_runtime()
         try:
-            from litellm import completion_cost
+            from litellm import completion_cost, get_llm_provider, response_cost_calculator
         except ImportError:
             return 0.0
+        optional_params = _cost_optional_params(request_kwargs)
+        provider: str | None = None
         try:
-            return float(completion_cost(completion_response=response, model=model))
+            _, provider, _, _ = get_llm_provider(
+                model=model,
+                api_base=self.settings.litellm_api_base,
+            )
+        except Exception:
+            provider = None
+        try:
+            response_cost = float(
+                response_cost_calculator(
+                    response_object=response,
+                    model=model,
+                    custom_llm_provider=provider,
+                    call_type="completion",
+                    optional_params=optional_params,
+                )
+            )
+            if response_cost > 0:
+                return response_cost
+        except Exception:
+            pass
+        try:
+            return float(
+                completion_cost(
+                    completion_response=response,
+                    model=model,
+                    call_type="completion",
+                    custom_llm_provider=provider,
+                    optional_params=optional_params,
+                )
+            )
         except Exception:
             return 0.0
 
@@ -471,6 +592,49 @@ def _tool_names(tools: list[dict[str, Any]] | None) -> list[str]:
             if isinstance(name, str):
                 names.append(name)
     return names
+
+
+def _response_format_for_model[TResponse: BaseModel](
+    response_model: type[TResponse],
+) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": response_model.__name__,
+            "schema": response_model.model_json_schema(),
+            "strict": True,
+        },
+    }
+
+
+def _looks_like_response_schema_support_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    response_schema_markers = (
+        "json_schema",
+        "json schema",
+        "response_format",
+        "response schema",
+        "response_schema",
+        "structured outputs",
+    )
+    support_failure_markers = (
+        "invalid parameter",
+        "not supported",
+        "unsupported",
+        "unknown parameter",
+        "unrecognized request argument",
+    )
+    return any(marker in message for marker in response_schema_markers) and any(
+        marker in message for marker in support_failure_markers
+    )
+
+
+def _cost_optional_params(request_kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in request_kwargs.items()
+        if key not in {"max_retries", "messages", "model"} and value is not None
+    }
 
 
 def _configure_litellm_runtime() -> None:

@@ -2,11 +2,54 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from pydantic import ValidationError
+
 from truth_engine.adapters.db.repositories import TruthEngineRepository
 from truth_engine.contracts.models import RawArena, RawSignal
 from truth_engine.contracts.stages import LandscapeEntry
 from truth_engine.domain.enums import AgentName
 from truth_engine.tools.bundles import tool_bundle_for_agent
+
+_SIGNAL_SOURCE_TYPE_ALIASES = {
+    "g2_review": "review_site",
+    "capterra_review": "review_site",
+    "job_post": "job_posting",
+    "job_postings": "job_posting",
+    "forums": "forum",
+    "docs": "documentation",
+}
+
+_SIGNAL_RELIABILITY_CAPS = {
+    "app_review": 0.40,
+    "blog": 0.35,
+    "documentation": 0.30,
+    "forum": 0.40,
+    "github_issue": 0.30,
+    "job_posting": 0.50,
+    "news": 0.45,
+    "reddit": 0.40,
+    "review_site": 0.40,
+    "youtube": 0.30,
+}
+
+_SPEND_EVIDENCE_HINTS = (
+    "$",
+    "budget",
+    "consultant",
+    "contractor",
+    "cost us",
+    "hiring",
+    "license",
+    "paid",
+    "paying",
+    "payroll",
+    "pricing",
+    "salary",
+    "seat",
+    "spend",
+    "subscription",
+    "vendor",
+)
 
 
 class RepositoryToolRuntime:
@@ -73,17 +116,40 @@ class RepositoryToolRuntime:
     def _handle_view_arena_proposals(self, payload: dict[str, Any]) -> list[dict[str, str]]:
         return self.repository.list_arena_proposals(candidate_id=str(payload["candidate_id"]))
 
-    def _handle_add_signal(self, payload: dict[str, Any]) -> dict[str, str]:
-        return self.repository.add_raw_signal(
-            candidate_id=str(payload["candidate_id"]),
-            signal=_coerce_model(payload["signal"], RawSignal),
+    def _handle_add_signal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            signal = _coerce_model(payload["signal"], RawSignal)
+            normalized_signal, warnings = _normalize_raw_signal(signal)
+        except (ValidationError, ValueError) as error:
+            return {
+                "status": "invalid",
+                "reason": str(error),
+            }
+
+        result = dict(
+            self.repository.add_raw_signal(
+                candidate_id=str(payload["candidate_id"]),
+                signal=normalized_signal,
+            )
         )
+        result["applied_source_type"] = normalized_signal.source_type
+        result["applied_reliability_score"] = normalized_signal.reliability_score
+        result["proof_of_spend"] = normalized_signal.proof_of_spend
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     def _handle_view_signal_summary(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.repository.signal_summary(candidate_id=str(payload["candidate_id"]))
 
-    def _handle_add_landscape_entry(self, payload: dict[str, Any]) -> dict[str, str]:
-        entry = _coerce_model(payload["entry"], LandscapeEntry)
+    def _handle_add_landscape_entry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            entry = _coerce_model(payload["entry"], LandscapeEntry)
+        except (ValidationError, ValueError) as error:
+            return {
+                "status": "invalid",
+                "reason": str(error),
+            }
         return self.repository.add_landscape_entry(
             candidate_id=str(payload["candidate_id"]),
             entry=entry,
@@ -131,6 +197,48 @@ def _coerce_model(value: Any, model_type: type[Any]) -> Any:
     if isinstance(value, model_type):
         return value
     return model_type.model_validate(value)
+
+
+def _normalize_raw_signal(signal: RawSignal) -> tuple[RawSignal, list[str]]:
+    source_type = _normalize_signal_source_type(signal.source_type)
+    warnings: list[str] = []
+    updates: dict[str, Any] = {}
+
+    if source_type != signal.source_type:
+        updates["source_type"] = source_type
+        warnings.append(f"Normalized source_type from `{signal.source_type}` to `{source_type}`.")
+
+    reliability_cap = _SIGNAL_RELIABILITY_CAPS[source_type]
+    if signal.reliability_score > reliability_cap:
+        updates["reliability_score"] = reliability_cap
+        warnings.append(
+            f"Capped reliability_score at {reliability_cap:.2f} for source_type `{source_type}`."
+        )
+
+    if signal.proof_of_spend and not _has_explicit_spend_evidence(signal.verbatim_quote):
+        updates["proof_of_spend"] = False
+        warnings.append(
+            "Downgraded proof_of_spend to false because the quote does not "
+            "explicitly indicate spending."
+        )
+
+    if not updates:
+        return signal, warnings
+    return signal.model_copy(update=updates), warnings
+
+
+def _normalize_signal_source_type(source_type: str) -> str:
+    normalized = source_type.strip().lower().replace("-", "_").replace(" ", "_")
+    canonical = _SIGNAL_SOURCE_TYPE_ALIASES.get(normalized, normalized)
+    if canonical not in _SIGNAL_RELIABILITY_CAPS:
+        supported = ", ".join(sorted(_SIGNAL_RELIABILITY_CAPS))
+        raise ValueError(f"Unsupported source_type `{source_type}`. Supported values: {supported}.")
+    return canonical
+
+
+def _has_explicit_spend_evidence(verbatim_quote: str) -> bool:
+    quote_lower = verbatim_quote.lower()
+    return any(hint in quote_lower for hint in _SPEND_EVIDENCE_HINTS)
 
 
 def _unavailable_tool(tool_name: str) -> dict[str, str]:
