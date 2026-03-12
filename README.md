@@ -79,22 +79,44 @@ If you prefer a LiteLLM proxy/gateway, set:
 - `TRUTH_ENGINE_LITELLM_API_BASE`
 - `TRUTH_ENGINE_LITELLM_API_KEY`
 
+Useful runtime overrides:
+
+- `TRUTH_ENGINE_AGENT_MAX_TOOL_ROUNDS=100`
+
 ## Run Live
 
-The sample request file is [examples/live_request.json](/Users/liamvdb/Workspace/Active/Work/truth_engine/examples/live_request.json).
+`run-live` now starts Arena Discovery from system context, matching the workflow doc:
+
+- `founder_constraints`
+- `past_learnings`
+
+It does not require an operator brief or seed arenas.
+
+If you want to override the default founder constraints, use [examples/live_request.json](/Users/liamvdb/Workspace/Active/Work/truth_engine/examples/live_request.json). Otherwise you can run with no request file at all.
 
 Run the live stages `0-5` flow:
 
 ```bash
+python -m truth_engine run-live --prompt-version live-v1
+```
+
+Optional founder-constraint override:
+
+```bash
 python -m truth_engine run-live \
   --request-file examples/live_request.json \
-  --database-url sqlite:///./truth_engine.db \
-  --output-dir ./out \
   --prompt-version live-v1
 ```
 
-If the candidate passes Gate B, the dossier is written to `./out/<candidate_id>.md` and
-`./out/<candidate_id>.json`.
+Runtime artifacts are written to `./out` by default:
+
+- `./out/<candidate_id>.trace.md`
+- `./out/<candidate_id>.md`
+- `./out/<candidate_id>.json`
+
+The trace file is appended while the run is active. For live runs it includes stage transitions,
+compiled prompts, assistant responses, tool calls, tool results, JSON repair attempts, and final
+artifacts.
 
 ## Run Fixture
 
@@ -103,9 +125,7 @@ Run the full Gate B workflow on the primary happy-path fixture:
 ```bash
 python -m truth_engine run-fixture \
   --fixture tests/fixtures/workflows/investigate_revise_reachable.json \
-  --database-url sqlite:///./truth_engine.db \
-  --output-dir ./out \
-  --prompt-version v0
+  --prompt-version live-v1
 ```
 
 ## Prompt Inspection
@@ -155,9 +175,11 @@ pytest -q
 
 ## Source Of Truth
 
-Implementation is constrained by:
+Implementation and planning intent are constrained by:
 
 1. `truth_engine_v1_agent_workflow.md`
-2. `docs/implementation_contract.md`
-3. `docs/resolved_decisions.md`
-4. `docs/stack_decisions.md`
+2. `planning/implementation_contract.md`
+3. `planning/resolved_decisions.md`
+4. `planning/stack_decisions.md`
+
+Code-oriented documentation lives in [`docs/README.md`](/Users/liamvdb/Workspace/Active/Work/truth_engine/docs/README.md).

@@ -11,16 +11,16 @@ Operational guide for coding agents in this repository.
 ## 2) Source-of-Truth Docs (Read First)
 Read in this order before making changes:
 1. `truth_engine_v1_agent_workflow.md`
-2. `docs/implementation_contract.md` if it exists
-3. `docs/resolved_decisions.md`
-4. `docs/arena_definition.md`
-5. `docs/stack_decisions.md`
-6. `docs/outreach_strategy.md`
-7. `docs/scraping_strategy.md`
+2. `planning/implementation_contract.md` if it exists
+3. `planning/resolved_decisions.md`
+4. `planning/arena_definition.md`
+5. `planning/stack_decisions.md`
+6. `planning/outreach_strategy.md`
+7. `planning/scraping_strategy.md`
 
 Conflict rule:
-- product workflow intent: `truth_engine_v1_agent_workflow.md` > `docs/resolved_decisions.md` > others
-- implementation-specific ambiguities: `docs/implementation_contract.md` > conflicting secondary summaries and budget/tier drift
+- product workflow intent: `truth_engine_v1_agent_workflow.md` > `planning/resolved_decisions.md` > others
+- implementation-specific ambiguities: `planning/implementation_contract.md` > conflicting secondary summaries and budget/tier drift
 
 ## 3) Build / Lint / Test Commands
 Use this command contract when adding or updating code.

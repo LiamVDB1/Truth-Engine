@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,7 +14,8 @@ from truth_engine.config.settings import Settings
 from truth_engine.contracts.stages import ActivityMetrics
 from truth_engine.domain.enums import AgentName
 from truth_engine.prompts.builder import PromptBundle
-from truth_engine.services.logging import debug_json_repair, debug_llm_call, debug_tool_exec
+from truth_engine.services.logging import debug_json_repair, debug_llm_call, log_tool_exec
+from truth_engine.services.run_trace import RunTraceWriter
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -30,11 +32,15 @@ class LiteLLMAgentRunner:
         settings: Settings,
         *,
         completion_fn: Callable[..., Any] | None = None,
+        proxy_completion_fn: Callable[..., Any] | None = None,
         cost_calculator: Callable[[Any, str], float] | None = None,
+        trace_writer: RunTraceWriter | None = None,
     ):
         self.settings = settings
         self._completion_fn = completion_fn
+        self._proxy_completion_fn = proxy_completion_fn
         self._cost_calculator = cost_calculator
+        self.trace_writer = trace_writer
 
     def run(
         self,
@@ -44,7 +50,9 @@ class LiteLLMAgentRunner:
         response_model: type[T],
         tools: list[dict[str, Any]] | None,
         tool_executor: Callable[[str, dict[str, Any]], Any] | None,
+        required_tool_names: set[str] | None = None,
     ) -> AgentExecution[T]:
+        _configure_litellm_runtime()
         model = resolve_agent_model(agent, self.settings)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": prompt.system_prompt},
@@ -55,18 +63,48 @@ class LiteLLMAgentRunner:
         output_tokens = 0
         cost_eur = 0.0
         tool_calls = 0
+        tool_rounds_used = 0
         repair_attempts = 0
+        finalization_prompt_sent = False
+        seen_tool_signatures: dict[str, int] = {}
+        executed_tool_names: set[str] = set()
+        required_tools = required_tool_names or set()
 
         max_rounds = self.settings.agent_max_tool_rounds + self.settings.llm_max_retries + 1
         for _round in range(max_rounds):
-            response = self._completion()(
+            tool_choice: str | None = None
+            if tools is not None:
+                if tool_rounds_used < self.settings.agent_max_tool_rounds:
+                    tool_choice = "auto"
+                else:
+                    tool_choice = "none"
+                    if not finalization_prompt_sent:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Tool budget is exhausted. Return the final JSON output now. "
+                                    "Do not call any more tools."
+                                ),
+                            }
+                        )
+                        finalization_prompt_sent = True
+            if self.trace_writer is not None:
+                self.trace_writer.llm_round(
+                    agent=agent.value,
+                    model=model,
+                    round_num=_round + 1,
+                    prompt=prompt if _round == 0 else None,
+                    tool_choice=tool_choice,
+                    tool_names=_tool_names(tools),
+                )
+            response = self._completion(model)(
                 model=model,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto" if tools else None,
+                tool_choice=tool_choice,
                 temperature=self.settings.llm_temperature,
                 max_retries=self.settings.llm_max_retries,
-                **self._completion_auth_kwargs(),
             )
             input_tokens += int(_usage_value(response, "prompt_tokens"))
             output_tokens += int(_usage_value(response, "completion_tokens"))
@@ -78,13 +116,74 @@ class LiteLLMAgentRunner:
             if parsed_tool_calls:
                 if tool_executor is None:
                     raise ValueError("Tool calls were returned without a tool executor.")
+                tool_rounds_used += 1
                 messages.append(_assistant_message_payload(message))
                 for tool_call in parsed_tool_calls:
                     arguments = json.loads(tool_call["function"]["arguments"])
                     tool_name = tool_call["function"]["name"]
-                    tool_result = tool_executor(tool_name, arguments)
+                    tool_signature = _tool_signature(tool_name, arguments)
+                    if self.trace_writer is not None:
+                        self.trace_writer.tool_call(
+                            agent=agent.value,
+                            round_num=_round + 1,
+                            tool_name=tool_name,
+                            arguments=arguments,
+                        )
+                    seen_count = seen_tool_signatures.get(tool_signature, 0)
+                    if seen_count >= 1:
+                        tool_result = {
+                            "status": "duplicate_call_blocked",
+                            "tool": tool_name,
+                            "reason": (
+                                "This exact tool call was already executed. "
+                                "Review the prior result and finalize unless a materially "
+                                "different call is necessary."
+                            ),
+                        }
+                        log_tool_exec(
+                            agent.value,
+                            tool_name,
+                            "duplicate_call_blocked",
+                            arguments=arguments,
+                        )
+                    else:
+                        try:
+                            tool_result = tool_executor(tool_name, arguments)
+                        except Exception as error:
+                            log_tool_exec(agent.value, tool_name, "error", arguments=arguments)
+                            if self.trace_writer is not None:
+                                self.trace_writer.tool_result(
+                                    agent=agent.value,
+                                    round_num=_round + 1,
+                                    tool_name=tool_name,
+                                    result={"error": str(error)},
+                                    status="error",
+                                )
+                            raise
+                        tool_status = (
+                            str(tool_result.get("status", "ok"))
+                            if isinstance(tool_result, dict)
+                            else "ok"
+                        )
+                        log_tool_exec(
+                            agent.value,
+                            tool_name,
+                            tool_status,
+                            arguments=arguments,
+                        )
+                    seen_tool_signatures[tool_signature] = seen_count + 1
+                    executed_tool_names.add(tool_name)
                     tool_calls += 1
-                    debug_tool_exec(agent.value, tool_name, "ok")
+                    if self.trace_writer is not None:
+                        self.trace_writer.tool_result(
+                            agent=agent.value,
+                            round_num=_round + 1,
+                            tool_name=tool_name,
+                            result=tool_result,
+                            status=str(tool_result.get("status", "ok"))
+                            if isinstance(tool_result, dict)
+                            else "ok",
+                        )
                     messages.append(
                         {
                             "role": "tool",
@@ -105,8 +204,40 @@ class LiteLLMAgentRunner:
                 continue
 
             content = _message_content(message)
+            if self.trace_writer is not None:
+                self.trace_writer.llm_response(
+                    agent=agent.value,
+                    model=model,
+                    round_num=_round + 1,
+                    content=content,
+                )
             try:
                 parsed = _parse_response_model(content, response_model)
+                missing_required_tools = sorted(required_tools - executed_tool_names)
+                if missing_required_tools:
+                    if tool_rounds_used >= self.settings.agent_max_tool_rounds:
+                        raise RuntimeError(
+                            f"{agent.value} exhausted its tool budget before calling the "
+                            f"required tool(s): {', '.join(missing_required_tools)}."
+                        )
+                    if self.trace_writer is not None:
+                        self.trace_writer.required_tools_missing(
+                            agent=agent.value,
+                            missing_tools=missing_required_tools,
+                        )
+                    messages.append(_assistant_message_payload(message))
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Do not finalize yet. Before returning the final JSON, "
+                                "you must call these required tool(s): "
+                                f"{', '.join(missing_required_tools)}. "
+                                "Persist the required records first, then return the final JSON."
+                            ),
+                        }
+                    )
+                    continue
                 debug_llm_call(
                     agent.value,
                     model,
@@ -131,6 +262,12 @@ class LiteLLMAgentRunner:
                     ) from error
                 repair_attempts += 1
                 debug_json_repair(agent.value, repair_attempts, str(error))
+                if self.trace_writer is not None:
+                    self.trace_writer.json_repair(
+                        agent=agent.value,
+                        attempt=repair_attempts,
+                        error=str(error),
+                    )
                 messages.append(_assistant_message_payload(message))
                 messages.append(
                     {
@@ -143,22 +280,59 @@ class LiteLLMAgentRunner:
                     }
                 )
 
-        raise RuntimeError(f"{agent.value} exceeded the allowed completion rounds.")
+        raise RuntimeError(
+            f"{agent.value} exceeded the allowed completion rounds "
+            f"after {tool_rounds_used} tool rounds and {tool_calls} tool calls."
+        )
 
-    def _completion(self) -> Callable[..., Any]:
+    def _completion(self, model: str) -> Callable[..., Any]:
         if self._completion_fn is not None:
             return self._completion_fn
+        if self._should_use_proxy_mode(model):
+            if self._proxy_completion_fn is not None:
+                return self._proxy_completion_fn
+            return self._proxy_completion()
+        _configure_litellm_runtime()
         try:
             from litellm import completion
         except ImportError as error:
             raise RuntimeError(
                 "LiteLLM is not installed. Run `pip install -e .[dev]` after syncing dependencies."
             ) from error
-        return cast(Callable[..., Any], completion)
+        direct_completion = cast(Callable[..., Any], completion)
+
+        def call_direct(**kwargs: Any) -> Any:
+            return direct_completion(
+                **kwargs,
+                **self._completion_auth_kwargs(),
+            )
+
+        return call_direct
+
+    def _proxy_completion(self) -> Callable[..., Any]:
+        try:
+            from openai import OpenAI
+        except ImportError as error:
+            raise RuntimeError(
+                "openai is not installed. Run `pip install -e .[dev]` after syncing dependencies."
+            ) from error
+
+        client = OpenAI(
+            api_key=self._proxy_api_key(),
+            base_url=self._proxy_base_url(),
+        )
+
+        def call_proxy(**kwargs: Any) -> Any:
+            proxy_kwargs = dict(kwargs)
+            proxy_kwargs.pop("max_retries", None)
+            return client.chat.completions.create(**proxy_kwargs)
+
+        return call_proxy
 
     def _completion_cost(self, response: Any, model: str) -> float:
         if self._cost_calculator is not None:
             return self._cost_calculator(response, model)
+        _configure_litellm_runtime()
         try:
             from litellm import completion_cost
         except ImportError:
@@ -172,13 +346,25 @@ class LiteLLMAgentRunner:
         kwargs: dict[str, Any] = {}
         if self.settings.litellm_api_key is not None:
             kwargs["api_key"] = self.settings.litellm_api_key.get_secret_value()
-        elif self.settings.openai_api_key is not None:
-            api_key = self.settings.openai_api_key.get_secret_value()
-            kwargs["api_key"] = api_key
-            os.environ.setdefault("OPENAI_API_KEY", api_key)
         if self.settings.litellm_api_base is not None:
             kwargs["api_base"] = self.settings.litellm_api_base
         return kwargs
+
+    def _should_use_proxy_mode(self, model: str) -> bool:
+        return self.settings.litellm_api_base is not None and "/" not in model
+
+    def _proxy_api_key(self) -> str:
+        if self.settings.litellm_api_key is not None:
+            return self.settings.litellm_api_key.get_secret_value()
+        return "anything"
+
+    def _proxy_base_url(self) -> str:
+        api_base = self.settings.litellm_api_base
+        if api_base is None:
+            raise ValueError("TRUTH_ENGINE_LITELLM_API_BASE is required for proxy mode.")
+        if api_base.rstrip("/").endswith("/v1"):
+            return api_base
+        return f"{api_base.rstrip('/')}/v1"
 
 
 def _usage_value(response: Any, key: str) -> int:
@@ -268,3 +454,35 @@ def _extract_json_text(content: str) -> str:
     if start == -1:
         raise ValueError("No JSON object found in model response.")
     return stripped[start:]
+
+
+def _tool_signature(tool_name: str, arguments: dict[str, Any]) -> str:
+    return f"{tool_name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=True)}"
+
+
+def _tool_names(tools: list[dict[str, Any]] | None) -> list[str]:
+    if tools is None:
+        return []
+    names: list[str] = []
+    for tool in tools:
+        function_block = tool.get("function")
+        if isinstance(function_block, dict):
+            name = function_block.get("name")
+            if isinstance(name, str):
+                names.append(name)
+    return names
+
+
+def _configure_litellm_runtime() -> None:
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    os.environ.setdefault("LITELLM_LOG", "ERROR")
+    try:
+        import litellm
+    except ImportError:
+        return
+
+    litellm.suppress_debug_info = True
+    litellm.turn_off_message_logging = True
+    logging.getLogger("LiteLLM").setLevel(logging.ERROR)
+    logging.getLogger("LiteLLM Router").setLevel(logging.ERROR)
+    logging.getLogger("LiteLLM Proxy").setLevel(logging.ERROR)

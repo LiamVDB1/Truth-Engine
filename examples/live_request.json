@@ -1,18 +1,13 @@
 {
-  "candidate_id": "cand_logistics_ops_live",
-  "focus": "Find a software wedge for logistics operations teams struggling with shipment exception handling and customer update workflows.",
-  "seed_queries": [
-    "shipment exception handling software pain logistics operations",
-    "site:reddit.com logistics delay customer updates operations pain",
-    "logistics operations manager job posting shipment exceptions"
-  ],
-  "source_targets": [
-    "reddit",
-    "job_postings",
-    "public_web"
-  ],
-  "max_arena_proposals": 5,
-  "max_signals": 50,
-  "search_results_per_query": 5,
-  "notes": "Prefer software-first wedges with reachable heads of operations or operations excellence teams in EU/US."
+  "founder_constraints": {
+    "solution_modalities": ["saas", "api", "tool", "automation", "integration"],
+    "excluded_business_models": [
+      "physical_operations",
+      "manual_service_delivery",
+      "brick_and_mortar_ownership"
+    ],
+    "target_market": "any",
+    "geo_preference": "EU + US",
+    "v1_filter": "software_first"
+  }
 }

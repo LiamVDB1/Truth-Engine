@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from truth_engine.config.settings import Settings
 from truth_engine.contracts.models import RawArena, RawSignal
 from truth_engine.contracts.stages import LandscapeEntry
 from truth_engine.domain.enums import AgentName
@@ -10,8 +11,20 @@ from truth_engine.tools.bundles import tool_bundle_for_agent
 from truth_engine.tools.registry import tool_registry
 
 
-def tool_schemas_for_agent(agent: AgentName) -> list[dict[str, Any]]:
-    allowed_tool_names = {tool.name for tool in tool_bundle_for_agent(agent)}
+def tool_schemas_for_agent(
+    agent: AgentName,
+    *,
+    settings: Settings | None = None,
+    available_tool_names: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    allowed_tool_names = {
+        tool.name
+        for tool in tool_bundle_for_agent(
+            agent,
+            settings=settings,
+            available_tool_names=available_tool_names,
+        )
+    }
     return [_tool_schema(name) for name in _ORDERED_TOOL_NAMES if name in allowed_tool_names]
 
 

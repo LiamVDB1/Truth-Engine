@@ -1,2 +1,0 @@
-[console_scripts]
-truth-engine = truth_engine.cli.main:main

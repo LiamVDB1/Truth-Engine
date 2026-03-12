@@ -121,7 +121,7 @@ Gate A and Gate C behavior stay as defined in `truth_engine_v1_agent_workflow.md
 
 ## Budget: €5/Candidate Target
 
-**Implementation note:** the canonical per-stage budget table now lives in `docs/implementation_contract.md` and the workflow budget-control section. The grouped buckets below are only a high-level allocation envelope.
+**Implementation note:** the canonical per-stage budget table now lives in `implementation_contract.md` and the workflow budget-control section. The grouped buckets below are only a high-level allocation envelope.
 
 **High-level budget split:**
 

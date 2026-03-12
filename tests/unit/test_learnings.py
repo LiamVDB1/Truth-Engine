@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from truth_engine.contracts.models import RawArena
+from truth_engine.contracts.models import ProblemUnit, RawArena
 from truth_engine.contracts.stages import (
     CandidateDossier,
     ChannelPlan,
@@ -76,7 +76,6 @@ def _make_skeptic() -> SkepticReport:
         overall_risk="high",
         recommendation=SkepticRecommendation.KILL,
         recommendation_rationale="Insufficient evidence for spend willingness.",
-        improvement_suggestions=["Find budget data"],
     )
 
 
@@ -138,9 +137,7 @@ def test_pass_learnings_produces_entries() -> None:
     assert any("pass" in e.tags for e in entries)
 
 
-def _make_problem_unit():
-    from truth_engine.contracts.models import ProblemUnit
-
+def _make_problem_unit() -> ProblemUnit:
     return ProblemUnit(
         id="pu_1",
         job_to_be_done="Reduce shipment exceptions.",
@@ -174,10 +171,6 @@ def _make_wedge() -> WedgeHypothesis:
         first_10_onboarding="White-glove setup with data import",
         switching_ease="Low friction — runs alongside existing TMS",
         data_advantage="Training on shipment patterns",
-        unfair_advantage="ML on shipment data",
-        target_job="Reduce exceptions",
-        value_prop="Less manual work, fewer lost shipments",
-        anti_wedge_risks=["Requires data integration"],
     )
 
 

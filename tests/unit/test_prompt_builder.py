@@ -59,13 +59,38 @@ def test_build_prompt_includes_tool_manifest_for_tool_backed_agent() -> None:
             "stage": "signal_mining",
             "output_contract": "SignalMiningResult",
         },
-        settings=Settings(prompt_version="v-tools"),
+        settings=Settings.model_construct(
+            prompt_version="v-tools",
+            serper_api_key=None,
+            reddit_client_id=None,
+            reddit_client_secret=None,
+        ),
     )
 
     assert "allowed tools" in bundle.system_prompt.lower()
     assert "`add_signal`" in bundle.system_prompt
     assert "`fetch_page`" in bundle.system_prompt
-    assert "`reddit_fetch`" in bundle.system_prompt
+
+
+def test_build_prompt_removes_reddit_tools_when_reddit_is_not_configured() -> None:
+    bundle = build_prompt(
+        agent_id="signal_scout",
+        context={
+            "candidate_id": "cand_123",
+            "stage": "signal_mining",
+            "output_contract": "SignalMiningResult",
+        },
+        settings=Settings.model_construct(
+            prompt_version="v-tools",
+            serper_api_key=None,
+            reddit_client_id=None,
+            reddit_client_secret=None,
+        ),
+    )
+
+    assert "`reddit_fetch`" not in bundle.system_prompt
+    assert "`reddit_search`" not in bundle.system_prompt
+    assert "use `search_web` and `reddit_search`" not in bundle.system_prompt.lower()
 
 
 def test_build_prompt_serializes_nested_context_deterministically() -> None:
@@ -82,3 +107,34 @@ def test_build_prompt_serializes_nested_context_deterministically() -> None:
     assert first.user_prompt == second.user_prompt
     assert '"alpha": 1' in first.user_prompt
     assert '"beta": 2' in first.user_prompt
+
+
+def test_build_prompt_explains_founder_constraints_as_solution_scope() -> None:
+    bundle = build_prompt(
+        agent_id="arena_scout",
+        context={
+            "candidate_id": "cand_123",
+            "stage": "arena_discovery",
+            "output_contract": "ArenaSearchResult",
+            "founder_constraints": {
+                "solution_modalities": ["saas", "api", "tool"],
+                "excluded_business_models": [
+                    "physical_operations",
+                    "manual_service_delivery",
+                    "brick_and_mortar_ownership",
+                ],
+                "target_market": "any",
+                "geo_preference": "EU + US",
+                "v1_filter": "software_first",
+            },
+        },
+        settings=Settings(),
+    )
+
+    assert "constraints on the solution we build, not on the customer's industry" in (
+        bundle.system_prompt.lower()
+    )
+    assert (
+        "software for connecting restaurant owners with suppliers" in bundle.system_prompt.lower()
+    )
+    assert "run a restaurant at this location" in bundle.system_prompt.lower()

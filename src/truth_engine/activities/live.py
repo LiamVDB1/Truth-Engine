@@ -41,6 +41,9 @@ from truth_engine.tools.schemas import tool_schemas_for_agent
 
 class LiveActivityBundle:
     persists_tool_state = True
+    _MAX_ARENA_PROPOSALS = 6
+    _SEARCH_RESULTS_PER_QUERY = 5
+    _MAX_SIGNALS = 60
 
     def __init__(
         self,
@@ -72,12 +75,9 @@ class LiveActivityBundle:
             "candidate_id": self.candidate_id,
             "stage": Stage.ARENA_DISCOVERY.value,
             "output_contract": "ArenaSearchResult",
-            "focus": self.request.focus,
             "founder_constraints": self.request.founder_constraints.model_dump(mode="json"),
-            "seed_queries": self._seed_queries(),
-            "max_arena_proposals": self.request.max_arena_proposals,
-            "search_results_per_query": self.request.search_results_per_query,
-            "notes": self.request.notes,
+            "past_learnings": self.repository.list_recent_learnings(limit=10),
+            "max_arena_proposals": self._MAX_ARENA_PROPOSALS,
             "execution_requirements": [
                 "Use search_web and reddit_search to gather breadth-first evidence.",
                 "Persist each viable arena via create_arena_proposal.",
@@ -86,10 +86,19 @@ class LiveActivityBundle:
         }
         scout_execution = self.agent_runner.run(
             agent=AgentName.ARENA_SCOUT,
-            prompt=build_prompt(AgentName.ARENA_SCOUT.value, scout_context, self.settings),
+            prompt=build_prompt(
+                AgentName.ARENA_SCOUT.value,
+                scout_context,
+                self.settings,
+                available_tool_names=self.tool_runtime.available_tool_names(AgentName.ARENA_SCOUT),
+            ),
             response_model=ArenaSearchResult,
-            tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+            tools=tool_schemas_for_agent(
+                AgentName.ARENA_SCOUT,
+                available_tool_names=self.tool_runtime.available_tool_names(AgentName.ARENA_SCOUT),
+            ),
             tool_executor=self._tool_executor(AgentName.ARENA_SCOUT),
+            required_tool_names={"create_arena_proposal"},
         )
 
         raw_arenas = self.repository.load_arena_proposals(self.candidate_id)
@@ -131,9 +140,9 @@ class LiveActivityBundle:
             "stage": Stage.SIGNAL_MINING.value,
             "output_contract": "SignalMiningResult",
             "arena": selected_arena.model_dump(mode="json"),
-            "source_targets": self.request.source_targets,
+            "source_targets": _source_targets_for_arena(selected_arena),
             "targeted_weakness": targeted_weakness,
-            "max_signals": self.request.max_signals,
+            "max_signals": self._MAX_SIGNALS,
             "existing_signal_summary": self.repository.signal_summary(self.candidate_id),
             "execution_requirements": [
                 "Persist each signal via add_signal.",
@@ -143,10 +152,19 @@ class LiveActivityBundle:
         }
         execution = self.agent_runner.run(
             agent=AgentName.SIGNAL_SCOUT,
-            prompt=build_prompt(AgentName.SIGNAL_SCOUT.value, prompt_context, self.settings),
+            prompt=build_prompt(
+                AgentName.SIGNAL_SCOUT.value,
+                prompt_context,
+                self.settings,
+                available_tool_names=self.tool_runtime.available_tool_names(AgentName.SIGNAL_SCOUT),
+            ),
             response_model=SignalMiningResult,
-            tools=tool_schemas_for_agent(AgentName.SIGNAL_SCOUT),
+            tools=tool_schemas_for_agent(
+                AgentName.SIGNAL_SCOUT,
+                available_tool_names=self.tool_runtime.available_tool_names(AgentName.SIGNAL_SCOUT),
+            ),
             tool_executor=self._tool_executor(AgentName.SIGNAL_SCOUT),
+            required_tool_names={"add_signal"},
         )
         return SignalMiningFixtureRun(
             targeted_weakness=targeted_weakness,
@@ -196,10 +214,19 @@ class LiveActivityBundle:
                     ],
                 },
                 self.settings,
+                available_tool_names=self.tool_runtime.available_tool_names(
+                    AgentName.LANDSCAPE_SCOUT
+                ),
             ),
             response_model=LandscapeReport,
-            tools=tool_schemas_for_agent(AgentName.LANDSCAPE_SCOUT),
+            tools=tool_schemas_for_agent(
+                AgentName.LANDSCAPE_SCOUT,
+                available_tool_names=self.tool_runtime.available_tool_names(
+                    AgentName.LANDSCAPE_SCOUT
+                ),
+            ),
             tool_executor=self._tool_executor(AgentName.LANDSCAPE_SCOUT),
+            required_tool_names={"add_landscape_entry"},
         )
         self._latest_landscape_report = execution.result
         return LandscapeResearchFixture(
@@ -354,17 +381,6 @@ class LiveActivityBundle:
         )
         return ChannelValidationFixtureRun(metrics=execution.metrics, result=execution.result)
 
-    def _seed_queries(self) -> list[str]:
-        if self.request.seed_queries:
-            return self.request.seed_queries
-        focus = self.request.focus
-        return [
-            focus,
-            f"{focus} software pain",
-            f"{focus} job postings operations",
-            f"site:reddit.com {focus} pain",
-        ]
-
     def _tool_executor(self, agent: AgentName) -> Any:
         def execute(tool_name: str, arguments: dict[str, Any]) -> Any:
             payload = _tool_payload(tool_name, self.candidate_id, arguments)
@@ -453,3 +469,9 @@ def _assign_wedge_ids(proposal: WedgeProposal) -> WedgeProposal:
         else:
             wedges.append(wedge)
     return proposal.model_copy(update={"wedges": wedges})
+
+
+def _source_targets_for_arena(arena: EvaluatedArena) -> list[str]:
+    if arena.recommended_first_sources:
+        return arena.recommended_first_sources
+    return ["reddit", "job_postings", "public_web"]

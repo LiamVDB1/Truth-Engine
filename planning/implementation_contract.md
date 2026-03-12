@@ -21,7 +21,7 @@ It does not replace the product workflow. It resolves implementation ambiguities
 
 ## v0.1 Boundary
 
-v0.1 is Phases 0-3 inclusive in `docs/implementation_plan.md`.
+v0.1 is Phases 0-3 inclusive in `implementation_plan.md`.
 
 That means:
 
@@ -38,7 +38,7 @@ For implementation:
 - Gate B = Stage 5 reachability gate after Wedge Design + Buyer/Channel Validation
 - Gate C = Stage 7 commitment threshold gate
 
-The earlier reachability language in `docs/resolved_decisions.md` is treated as the decision rationale behind Gate B, not as the runtime definition of Gate A.
+The earlier reachability language in `resolved_decisions.md` is treated as the decision rationale behind Gate B, not as the runtime definition of Gate A.
 
 ## Canonical v0.1 Agent Tier Decisions
 
@@ -82,7 +82,7 @@ Clarifications:
 
 - The `Maze Historian` label is retired. The intended Stage 3 agent is `Landscape Scout`.
 - Stage 3 base budget is implemented as Landscape Scout + Scorer + Skeptic.
-- The grouped bucket table in `docs/resolved_decisions.md` is treated as a high-level envelope, not the canonical stage-level budget source.
+- The grouped bucket table in `resolved_decisions.md` is treated as a high-level envelope, not the canonical stage-level budget source.
 
 ## Canonical v0.1 Dedup Strategy
 
@@ -143,7 +143,7 @@ Treat these as optional in v0.1:
 
 ## Canonical Prompt-System Implementation Scope
 
-The long-term prompt architecture in `docs/implementation_plan.md` remains valid, but the implementation scope for Phase 0-1 is intentionally smaller.
+The long-term prompt architecture in `implementation_plan.md` remains valid, but the implementation scope for Phase 0-1 is intentionally smaller.
 
 Phase 0-1 prompt work includes:
 

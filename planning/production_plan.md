@@ -188,15 +188,15 @@ Learnings system:
 
 ## Phase 6: Documentation Refresh
 
-### [DELETE] `docs/implementation_plan.md`
+### [DELETE] `planning/implementation_plan.md`
 
-Old plan — replaced by `docs/implementation_contract.md`.
+Old plan — replaced by `planning/implementation_contract.md`.
 
-### [DELETE] `docs/build_state.md`
+### [DELETE] `planning/build_state.md`
 
 Old state — no longer accurate.
 
-### [MODIFY] `docs/implementation_contract.md`
+### [MODIFY] `planning/implementation_contract.md`
 
 Update to reflect production state.
 

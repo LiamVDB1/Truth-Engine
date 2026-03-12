@@ -14,12 +14,16 @@ import logging
 import sys
 from typing import Any
 
+from truth_engine.domain.enums import ToolSideEffectLevel
+from truth_engine.tools.registry import tool_registry
+
 _FLOW_PREFIX = "\033[36m⟩\033[0m"  # cyan arrow for flow events
 _GATE_ADVANCE = "\033[32m✓\033[0m"  # green check
 _GATE_KILL = "\033[31m✗\033[0m"  # red cross
 _GATE_INVESTIGATE = "\033[33m?\033[0m"  # yellow question
 _GATE_RETRY = "\033[33m↻\033[0m"  # yellow retry
 _COST = "\033[90m€\033[0m"  # dim euro
+_TOOL = "\033[35m•\033[0m"  # magenta dot
 
 _ACTION_ICONS = {
     "advance": _GATE_ADVANCE,
@@ -49,6 +53,7 @@ def configure_logging(level: str = "INFO") -> None:
     handler.setFormatter(logging.Formatter(fmt, datefmt="%H:%M:%S"))
     root.addHandler(handler)
     root.setLevel(resolved_level)
+    root.propagate = False
 
 
 # ── Flow-level events (INFO) ─────────────────────────────────
@@ -202,9 +207,39 @@ def debug_llm_call(
     )
 
 
-def debug_tool_exec(agent: str, tool_name: str, status: str) -> None:
-    """Log a tool execution (DEBUG)."""
+def log_tool_exec(
+    agent: str,
+    tool_name: str,
+    status: str,
+    *,
+    arguments: dict[str, Any] | None = None,
+) -> None:
+    """Log a tool execution.
+
+    Write-side-effect tools are surfaced at INFO so they remain visible in the default
+    terminal flow view. Lower-signal network/read tools stay at DEBUG unless they fail.
+    """
     logger = logging.getLogger("truth_engine.tools")
+    tool_spec = tool_registry().get(tool_name)
+    candidate_id = _tool_candidate_id(arguments)
+    status_label = status.upper()
+
+    if tool_spec is not None and tool_spec.side_effect_level == ToolSideEffectLevel.WRITE:
+        candidate_prefix = f"{candidate_id} │ " if candidate_id is not None else ""
+        logger.info(
+            "%s %stools │ %s │ %s → %s",
+            _TOOL,
+            candidate_prefix,
+            agent,
+            tool_name,
+            status_label,
+        )
+        return
+
+    if status != "ok":
+        logger.warning("Tool exec │ %s │ %s → %s", agent, tool_name, status)
+        return
+
     logger.debug("Tool exec │ %s │ %s → %s", agent, tool_name, status)
 
 
@@ -219,3 +254,12 @@ def debug_adapter(adapter: str, operation: str, **fields: Any) -> None:
     logger = logging.getLogger("truth_engine.adapters")
     field_str = " ".join(f"{k}={v}" for k, v in fields.items())
     logger.debug("Adapter │ %s │ %s │ %s", adapter, operation, field_str)
+
+
+def _tool_candidate_id(arguments: dict[str, Any] | None) -> str | None:
+    if arguments is None:
+        return None
+    candidate_id = arguments.get("candidate_id")
+    if candidate_id is None:
+        return None
+    return str(candidate_id)

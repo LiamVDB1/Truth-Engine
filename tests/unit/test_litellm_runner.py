@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import copy
+import logging
 from typing import Any
+from unittest.mock import patch
+
+from pydantic import SecretStr
 
 from truth_engine.adapters.llm.litellm_runner import LiteLLMAgentRunner
 from truth_engine.config.settings import Settings
 from truth_engine.contracts.stages import ArenaSearchResult
 from truth_engine.domain.enums import AgentName
 from truth_engine.prompts.builder import PromptBundle
+from truth_engine.services.logging import configure_logging
 from truth_engine.tools.schemas import tool_schemas_for_agent
 
 
@@ -16,10 +22,19 @@ class _FakeCompletionSequence:
         self.calls: list[dict[str, Any]] = []
 
     def __call__(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(kwargs)
+        self.calls.append(copy.deepcopy(kwargs))
         if not self._responses:
             raise AssertionError("No remaining fake responses.")
         return self._responses.pop(0)
+
+
+def _reset_truth_engine_logger() -> None:
+    logger = logging.getLogger("truth_engine")
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+    logger.setLevel(logging.NOTSET)
+    logger.propagate = True
 
 
 def test_litellm_runner_executes_tool_calls_and_parses_json() -> None:
@@ -144,3 +159,396 @@ def test_litellm_runner_repairs_invalid_json_once() -> None:
     assert execution.result.search_summary == "Repaired output."
     assert len(completion.calls) == 2
     assert "Return valid JSON" in completion.calls[1]["messages"][-1]["content"]
+
+
+def test_litellm_runner_uses_proxy_mode_for_alias_models() -> None:
+    proxy_completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Proxy alias worked."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 3},
+            }
+        ]
+    )
+    runner = LiteLLMAgentRunner(
+        settings=Settings(
+            litellm_api_base="http://localhost:4000",
+            litellm_api_key=SecretStr("proxy-key"),
+            tier1_model="minimax-m2.5",
+        ),
+        proxy_completion_fn=proxy_completion,
+        cost_calculator=lambda _response, _model: 0.0,
+    )
+
+    execution = runner.run(
+        agent=AgentName.ARENA_SCOUT,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=None,
+        tool_executor=None,
+    )
+
+    assert execution.result.search_summary == "Proxy alias worked."
+    assert len(proxy_completion.calls) == 1
+
+
+def test_litellm_runner_forces_finalization_after_tool_budget() -> None:
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "search_web",
+                                        "arguments": '{"query":"ops pain","limit":1}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Stopped after the tool budget."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 4},
+            },
+        ]
+    )
+    runner = LiteLLMAgentRunner(
+        settings=Settings(agent_max_tool_rounds=1),
+        completion_fn=completion,
+        cost_calculator=lambda _response, _model: 0.0,
+    )
+
+    execution = runner.run(
+        agent=AgentName.ARENA_SCOUT,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+        tool_executor=lambda _name, _arguments: {"status": "ok"},
+    )
+
+    assert execution.result.search_summary == "Stopped after the tool budget."
+    assert completion.calls[0]["tool_choice"] == "auto"
+    assert completion.calls[1]["tool_choice"] == "none"
+
+
+def test_litellm_runner_requires_persistence_tool_before_finalizing() -> None:
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],"search_summary":"Found a wedge."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 4},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "create_arena_proposal",
+                                        "arguments": (
+                                            '{"candidate_id":"cand_123",'
+                                            '"arena":{"domain":"Returns Ops",'
+                                            '"icp_user_role":"Ops Lead",'
+                                            '"icp_buyer_role":"Head of Ops",'
+                                            '"geo":"EU/US",'
+                                            '"channel_surface":["linkedin"],'
+                                            '"solution_modality":"software",'
+                                            '"market_signals":["complaints"],'
+                                            '"signal_sources":["reddit"],'
+                                            '"market_size_signal":"large",'
+                                            '"expected_sales_cycle":"30-60 days",'
+                                            '"rationale":"Good fit"}}'
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 5},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper","reddit"],'
+                                '"search_summary":"Persisted the arena."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 6},
+            },
+        ]
+    )
+    observed_tools: list[str] = []
+    def execute_tool(name: str, _arguments: dict[str, Any]) -> dict[str, str]:
+        observed_tools.append(name)
+        return {"status": "ok"}
+
+    runner = LiteLLMAgentRunner(
+        settings=Settings(agent_max_tool_rounds=3),
+        completion_fn=completion,
+        cost_calculator=lambda _response, _model: 0.0,
+    )
+
+    execution = runner.run(
+        agent=AgentName.ARENA_SCOUT,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+        tool_executor=execute_tool,
+        required_tool_names={"create_arena_proposal"},
+    )
+
+    assert execution.result.search_summary == "Persisted the arena."
+    assert observed_tools == ["create_arena_proposal"]
+    assert "must call these required tool(s)" in completion.calls[1]["messages"][-1]["content"]
+
+
+def test_litellm_runner_suppresses_litellm_debug_info() -> None:
+    class _FakeLiteLLMModule:
+        def __init__(self) -> None:
+            self.suppress_debug_info = False
+            self.turn_off_message_logging = False
+
+    fake_module = _FakeLiteLLMModule()
+    with patch.dict("sys.modules", {"litellm": fake_module}):
+        runner = LiteLLMAgentRunner(
+            settings=Settings(),
+            completion_fn=lambda **_kwargs: {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": ('{"sources_searched":["serper"],"search_summary":"Done."}'),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+            cost_calculator=lambda _response, _model: 0.0,
+        )
+        runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=PromptBundle(
+                system_prompt="system",
+                user_prompt="user",
+                prompt_version="v-test",
+                prompt_hash="abc123",
+            ),
+            response_model=ArenaSearchResult,
+            tools=None,
+            tool_executor=None,
+        )
+
+    assert fake_module.suppress_debug_info is True
+    assert fake_module.turn_off_message_logging is True
+
+
+def test_litellm_runner_logs_write_tool_calls_in_terminal_output(capsys: Any) -> None:
+    _reset_truth_engine_logger()
+    configure_logging("INFO")
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "create_arena_proposal",
+                                        "arguments": (
+                                            '{"candidate_id":"cand_123",'
+                                            '"arena":{"domain":"Returns Ops",'
+                                            '"icp_user_role":"Ops Lead",'
+                                            '"icp_buyer_role":"Head of Ops",'
+                                            '"geo":"EU/US",'
+                                            '"channel_surface":["linkedin"],'
+                                            '"solution_modality":"software",'
+                                            '"market_signals":["complaints"],'
+                                            '"signal_sources":["reddit"],'
+                                            '"market_size_signal":"large",'
+                                            '"expected_sales_cycle":"30-60 days",'
+                                            '"rationale":"Good fit"}}'
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 5},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Persisted the arena."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 6},
+            },
+        ]
+    )
+    runner = LiteLLMAgentRunner(
+        settings=Settings(agent_max_tool_rounds=2),
+        completion_fn=completion,
+        cost_calculator=lambda _response, _model: 0.0,
+    )
+
+    runner.run(
+        agent=AgentName.ARENA_SCOUT,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+        tool_executor=lambda _name, _arguments: {"status": "saved", "arena_id": "arena_123"},
+    )
+
+    stderr = capsys.readouterr().err
+    assert "create_arena_proposal" in stderr
+    assert "cand_123" in stderr
+    assert "SAVED" in stderr
+    _reset_truth_engine_logger()
+
+
+def test_litellm_runner_keeps_network_tool_logs_out_of_info_terminal_output(capsys: Any) -> None:
+    _reset_truth_engine_logger()
+    configure_logging("INFO")
+    completion = _FakeCompletionSequence(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "search_web",
+                                        "arguments": '{"query":"warehouse ops pain","limit":1}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7},
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                '{"sources_searched":["serper"],'
+                                '"search_summary":"Found one promising arena."}'
+                            ),
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 13, "completion_tokens": 9},
+            },
+        ]
+    )
+    runner = LiteLLMAgentRunner(
+        settings=Settings(),
+        completion_fn=completion,
+        cost_calculator=lambda _response, _model: 0.0,
+    )
+
+    runner.run(
+        agent=AgentName.ARENA_SCOUT,
+        prompt=PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="abc123",
+        ),
+        response_model=ArenaSearchResult,
+        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+        tool_executor=lambda _name, _arguments: {"status": "ok"},
+    )
+
+    stderr = capsys.readouterr().err
+    assert "search_web" not in stderr
+    _reset_truth_engine_logger()

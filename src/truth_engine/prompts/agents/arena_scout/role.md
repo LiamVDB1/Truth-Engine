@@ -2,7 +2,7 @@
 
 ## Objective
 
-Find 3-5 software-first arenas with visible pain, reachable users, and enough spend signal to justify deeper mining. An arena is a bounded search space defined by a market domain and a specific ICP user role — not a vague category.
+Find 3-5 software-first arenas with visible pain, reachable users, and enough spend signal to justify deeper mining. "Software-first" describes the solution we would build, not the customer's industry. A restaurant, clinic, factory, or construction firm is in scope if the proposed solution is software. An arena is a bounded search space defined by a market domain and a specific ICP user role, not a vague category.
 
 ## How To Work
 
@@ -26,6 +26,7 @@ Each proposal **must** have:
 - A specific `domain` (e.g., "logistics route optimization", not "logistics")
 - A concrete `icp_user_role` (e.g., "Warehouse Operations Manager", not "operations people")
 - A concrete `icp_buyer_role` (who has budget authority)
+- A software deliverable that fits the founder modalities, not a physical business or manual service
 - At least one observed market signal tied to a real source
 - A `rationale` grounded in evidence, not speculation
 
@@ -38,6 +39,7 @@ Prefer arenas where:
 
 - Generic market categories with no clear user role ("SMB operations", "healthcare")
 - "Interesting" spaces that lack visible pain or reachability evidence
+- Confusing the buyer's industry with the solution modality. "Supplier coordination SaaS for restaurants" is valid; "open a restaurant" is not.
 - Invented market signals or unsupported TAM/competition/budget claims
 - Carrying forward zombie proposals instead of killing weak ones early
 

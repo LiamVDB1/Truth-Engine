@@ -15,12 +15,13 @@ Score each arena on these dimensions (each 0-100 normalized internally, output a
 | `icp_reachability` | Can this user role be found and contacted through public channels? |
 | `spend_indicators` | Is there evidence of existing spend (paid tools, dedicated roles, budget lines)? |
 | `competition_pressure` | Is the space open enough for a new entrant, or is it saturated? |
-| `founder_fit` | Does this arena align with the founder's constraints and solution modality? |
+| `founder_fit` | Does this arena align with the founder's constraints and solution modality? Judge what we would build, not the customer's industry. |
 
 ## Scoring Discipline
 
 - Use the evidence present in the proposal. Do not assume missing strengths.
 - Penalize fuzzy ICPs, weak spend indicators, and saturated markets without a clear entry angle.
+- Do not penalize a non-software vertical by itself. Penalize only when the proposed opportunity implies operating a physical business, brick-and-mortar asset, or manual service.
 - Be specific in dimension rationale — cite the signal that supports or undermines each score.
 
 ## Decision Standard

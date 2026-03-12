@@ -19,7 +19,7 @@ Last updated: 2026-03-10
 - Stack direction: Temporal + PostgreSQL + LiteLLM + Instructor/Pydantic
 - High-level v0.1 boundary: Gate B
 - Live autonomous outbound in v0.1: no
-- Canonical implementation freeze: `docs/implementation_contract.md`
+- Canonical implementation freeze: `implementation_contract.md`
 - Canonical Normalizer tier: Tier 2
 - Canonical v0.1 dedup: deterministic fingerprint, not embeddings
 
@@ -38,9 +38,9 @@ Last updated: 2026-03-10
 ## Recently Completed
 
 - Full repo audit completed
-- Implementation plan created in `docs/implementation_plan.md`
+- Implementation plan created in `implementation_plan.md`
 - v0.1 boundary clarified as Gate B / Phases 0-3 inclusive
-- `docs/implementation_contract.md` created and frozen
+- `implementation_contract.md` created and frozen
 - Gate sequencing, budgets, dedup strategy, and Normalizer tier frozen for implementation
 - Python project scaffold created (`pyproject.toml`, `src/`, `tests/`, `.env.example`, `docker-compose.yml`)
 - Initial config layer implemented
@@ -62,9 +62,9 @@ Last updated: 2026-03-10
   - Gate B retry kill path
   - degrade-mode retry suppression
 - Local verification passing: `pytest`, `ruff check`, `mypy`, `alembic upgrade head`
-- Tools architecture added to `docs/implementation_plan.md`
-- Prompt architecture added to `docs/implementation_plan.md`
-- Living repo-state tracking initialized in `docs/build_state.md`
+- Tools architecture added to `implementation_plan.md`
+- Prompt architecture added to `implementation_plan.md`
+- Living repo-state tracking initialized in `build_state.md`
 - External consultation attempted:
   - Gemini consult succeeded
   - GLM-5 consult failed due provider/tooling error

@@ -50,6 +50,7 @@ from truth_engine.services.logging import (
     flow_stage_done,
     flow_stage_start,
 )
+from truth_engine.services.run_trace import RunTraceWriter
 from truth_engine.tools.runtime import RepositoryToolRuntime
 
 
@@ -60,10 +61,12 @@ class CandidateWorkflowRunner:
         settings: Settings,
         *,
         tool_runtime: RepositoryToolRuntime | None = None,
+        trace_writer: RunTraceWriter | None = None,
     ):
         self.repository = repository
         self.settings = settings
         self.tool_runtime = tool_runtime or RepositoryToolRuntime(repository)
+        self.trace_writer = trace_writer
 
     def run(self, activities: ActivityBundle) -> WorkflowOutcome:
         candidate_id = activities.candidate_id
@@ -71,10 +74,10 @@ class CandidateWorkflowRunner:
             self.repository.create_candidate(candidate_id=candidate_id, status="running")
         try:
             caution_flags: list[str] = []
-            flow_stage_start(candidate_id, "Arena Discovery", "arena_scout")
+            self._stage_start(candidate_id, "Arena Discovery", "arena_scout")
             selected_arena = self._run_arena_discovery(candidate_id, activities)
 
-            flow_stage_start(candidate_id, "Signal Mining", "signal_scout")
+            self._stage_start(candidate_id, "Signal Mining", "signal_scout")
             signal_run = activities.signal_mining()
             self._run_signal_mining(
                 candidate_id,
@@ -82,13 +85,13 @@ class CandidateWorkflowRunner:
                 attempt_index=0,
                 persists_tool_state=activities.persists_tool_state,
             )
-            flow_stage_done(
+            self._stage_done(
                 candidate_id,
                 "Signal Mining",
                 "signal_scout",
                 cost_eur=signal_run.metrics.cost_eur,
             )
-            flow_stage_start(candidate_id, "Normalization", "normalizer")
+            self._stage_start(candidate_id, "Normalization", "normalizer")
             normalization_run = activities.normalization()
             problem_units = normalization_run.result.problem_units
             self._record_agent_stage_run(
@@ -105,7 +108,7 @@ class CandidateWorkflowRunner:
                 },
             )
             self.repository.replace_problem_units(candidate_id, problem_units)
-            flow_stage_done(
+            self._stage_done(
                 candidate_id,
                 "Normalization",
                 "normalizer",
@@ -113,7 +116,7 @@ class CandidateWorkflowRunner:
                 summary=f"{len(problem_units)} problem units",
             )
 
-            flow_stage_start(candidate_id, "Landscape", "landscape_scout")
+            self._stage_start(candidate_id, "Landscape", "landscape_scout")
             landscape = activities.landscape_research()
             self._record_agent_stage_run(
                 candidate_id=candidate_id,
@@ -130,7 +133,7 @@ class CandidateWorkflowRunner:
             )
             if not activities.persists_tool_state:
                 self.repository.replace_landscape_entries(candidate_id, landscape.entries)
-            flow_stage_done(
+            self._stage_done(
                 candidate_id,
                 "Landscape",
                 "landscape_scout",
@@ -142,7 +145,7 @@ class CandidateWorkflowRunner:
             skeptic_result: SkepticReport | None = None
             gate_a_iteration = 0
             while True:
-                flow_stage_start(
+                self._stage_start(
                     candidate_id,
                     "Scoring",
                     "scorer",
@@ -173,7 +176,7 @@ class CandidateWorkflowRunner:
                 )
                 if selected_problem_unit is None:
                     raise ValueError(f"Unknown problem unit: {scoring_result.problem_unit_id}")
-                flow_stage_done(
+                self._stage_done(
                     candidate_id,
                     "Scoring",
                     "scorer",
@@ -181,7 +184,7 @@ class CandidateWorkflowRunner:
                     summary=f"score={scoring_result.total_score}",
                 )
 
-                flow_stage_start(
+                self._stage_start(
                     candidate_id,
                     "Skeptic",
                     "skeptic",
@@ -202,7 +205,7 @@ class CandidateWorkflowRunner:
                     },
                 )
                 skeptic_result = skeptic_run.result
-                flow_stage_done(
+                self._stage_done(
                     candidate_id,
                     "Skeptic",
                     "skeptic",
@@ -225,7 +228,7 @@ class CandidateWorkflowRunner:
                     reason=gate_a_decision.reason,
                     iteration=gate_a_iteration,
                 )
-                flow_gate_decision(
+                self._gate_decision(
                     candidate_id,
                     "Gate A",
                     gate_a_decision.action.value,
@@ -235,7 +238,7 @@ class CandidateWorkflowRunner:
                 )
 
                 if gate_a_decision.action is GateAction.INVESTIGATE:
-                    flow_stage_start(
+                    self._stage_start(
                         candidate_id,
                         "Targeted Mining",
                         "signal_scout",
@@ -289,7 +292,7 @@ class CandidateWorkflowRunner:
             wedge_iteration = 0
             selected_wedge: WedgeHypothesis | None = None
             while True:
-                flow_stage_start(
+                self._stage_start(
                     candidate_id,
                     "Wedge Design",
                     "wedge_designer",
@@ -309,7 +312,7 @@ class CandidateWorkflowRunner:
                         "output_contract": "WedgeProposal",
                     },
                 )
-                flow_stage_done(
+                self._stage_done(
                     candidate_id,
                     "Wedge Design",
                     "wedge_designer",
@@ -317,7 +320,7 @@ class CandidateWorkflowRunner:
                     summary=f"{len(wedge_design_run.result.wedges)} wedges",
                 )
 
-                flow_stage_start(
+                self._stage_start(
                     candidate_id,
                     "Wedge Critique",
                     "wedge_critic",
@@ -337,7 +340,7 @@ class CandidateWorkflowRunner:
                         "output_contract": "WedgeCritique",
                     },
                 )
-                flow_stage_done(
+                self._stage_done(
                     candidate_id,
                     "Wedge Critique",
                     "wedge_critic",
@@ -359,7 +362,7 @@ class CandidateWorkflowRunner:
                     reason=wedge_decision.reason,
                     iteration=wedge_iteration,
                 )
-                flow_gate_decision(
+                self._gate_decision(
                     candidate_id,
                     "Wedge Path",
                     wedge_decision.action.value,
@@ -392,7 +395,7 @@ class CandidateWorkflowRunner:
 
             gate_b_retry_index = 0
             while True:
-                flow_stage_start(
+                self._stage_start(
                     candidate_id,
                     "Buyer/Channel",
                     "buyer_channel_validator",
@@ -412,7 +415,7 @@ class CandidateWorkflowRunner:
                         "output_contract": "ChannelValidation",
                     },
                 )
-                flow_stage_done(
+                self._stage_done(
                     candidate_id,
                     "Buyer/Channel",
                     "buyer_channel_validator",
@@ -451,7 +454,7 @@ class CandidateWorkflowRunner:
                     reason=gate_b_decision.reason,
                     iteration=gate_b_retry_index,
                 )
-                flow_gate_decision(
+                self._gate_decision(
                     candidate_id,
                     "Gate B",
                     gate_b_decision.action.value,
@@ -486,7 +489,7 @@ class CandidateWorkflowRunner:
                 )
                 candidate = self.repository.get_candidate(candidate_id)
                 total_cost = candidate.total_cost_eur if candidate else 0.0
-                flow_outcome(candidate_id, "passed_gate_b", total_cost_eur=total_cost)
+                self._outcome(candidate_id, "passed_gate_b", total_cost_eur=total_cost)
                 return WorkflowOutcome(
                     candidate_id=candidate_id,
                     status="passed_gate_b",
@@ -496,7 +499,7 @@ class CandidateWorkflowRunner:
         except BudgetSafetyCapExceeded as error:
             candidate = self.repository.get_candidate(candidate_id)
             total_cost = candidate.total_cost_eur if candidate else 0.0
-            flow_budget_warning(candidate_id, "safety_cap", total_cost)
+            self._budget_warning(candidate_id, "safety_cap", total_cost)
             safety_cap_event = self._append_decision(
                 candidate_id=candidate_id,
                 stage=error.stage,
@@ -505,6 +508,10 @@ class CandidateWorkflowRunner:
                 iteration=error.attempt_index,
             )
             return self._kill_outcome(candidate_id, safety_cap_event)
+        except Exception as error:
+            if self.trace_writer is not None:
+                self.trace_writer.error(stage="workflow", error=error)
+            raise
 
     def _run_arena_discovery(self, candidate_id: str, activities: ActivityBundle) -> EvaluatedArena:
         arena_discovery = activities.arena_discovery()
@@ -642,7 +649,7 @@ class CandidateWorkflowRunner:
         self.repository.mark_candidate_killed(candidate_id)
         candidate = self.repository.get_candidate(candidate_id)
         total_cost = candidate.total_cost_eur if candidate else 0.0
-        flow_outcome(candidate_id, "killed", total_cost_eur=total_cost)
+        self._outcome(candidate_id, "killed", total_cost_eur=total_cost)
         return WorkflowOutcome(candidate_id=candidate_id, status="killed", final_decision=event)
 
     def _store_learnings(
@@ -703,6 +710,77 @@ class CandidateWorkflowRunner:
         if self._budget_mode(candidate_id) is BudgetMode.NORMAL:
             return 1
         return 0
+
+    def _stage_start(
+        self,
+        candidate_id: str,
+        stage: str,
+        agent: str,
+        *,
+        attempt: int = 0,
+        extra: str = "",
+    ) -> None:
+        flow_stage_start(candidate_id, stage, agent, attempt=attempt, extra=extra)
+        if self.trace_writer is not None:
+            self.trace_writer.stage_start(stage=stage, agent=agent, attempt=attempt, extra=extra)
+
+    def _stage_done(
+        self,
+        candidate_id: str,
+        stage: str,
+        agent: str,
+        *,
+        cost_eur: float = 0.0,
+        summary: str = "",
+    ) -> None:
+        flow_stage_done(candidate_id, stage, agent, cost_eur=cost_eur, summary=summary)
+        if self.trace_writer is not None:
+            self.trace_writer.stage_done(
+                stage=stage,
+                agent=agent,
+                cost_eur=cost_eur,
+                summary=summary,
+            )
+
+    def _gate_decision(
+        self,
+        candidate_id: str,
+        gate: str,
+        action: str,
+        reason: str,
+        *,
+        score: int | None = None,
+        budget_mode: str = "normal",
+    ) -> None:
+        flow_gate_decision(
+            candidate_id,
+            gate,
+            action,
+            reason,
+            score=score,
+            budget_mode=budget_mode,
+        )
+        if self.trace_writer is not None:
+            self.trace_writer.gate_decision(
+                gate=gate,
+                action=action,
+                reason=reason,
+                score=score,
+                budget_mode=budget_mode,
+            )
+
+    def _budget_warning(self, candidate_id: str, budget_mode: str, total_cost_eur: float) -> None:
+        flow_budget_warning(candidate_id, budget_mode, total_cost_eur)
+        if self.trace_writer is not None:
+            self.trace_writer.budget_warning(
+                budget_mode=budget_mode,
+                total_cost_eur=total_cost_eur,
+            )
+
+    def _outcome(self, candidate_id: str, status: str, *, total_cost_eur: float) -> None:
+        flow_outcome(candidate_id, status, total_cost_eur=total_cost_eur)
+        if self.trace_writer is not None:
+            self.trace_writer.outcome(status=status, total_cost_eur=total_cost_eur)
 
 
 class BudgetSafetyCapExceeded(RuntimeError):

@@ -1,3 +1,6 @@
+from pydantic import SecretStr
+
+from truth_engine.config.settings import Settings
 from truth_engine.domain.enums import AgentName
 from truth_engine.tools.bundles import tool_bundle_for_agent
 from truth_engine.tools.registry import tool_registry
@@ -36,3 +39,33 @@ def test_landscape_scout_bundle_includes_landscape_tools() -> None:
         "fetch_page",
         "extract_content",
     } <= names
+
+
+def test_tool_bundle_omits_reddit_tools_when_reddit_is_not_configured() -> None:
+    bundle = tool_bundle_for_agent(
+        AgentName.SIGNAL_SCOUT,
+        settings=Settings.model_construct(
+            serper_api_key=None,
+            reddit_client_id=None,
+            reddit_client_secret=None,
+        ),
+    )
+
+    names = {tool.name for tool in bundle}
+    assert "reddit_search" not in names
+    assert "reddit_fetch" not in names
+
+
+def test_tool_bundle_includes_reddit_tools_when_reddit_is_configured() -> None:
+    bundle = tool_bundle_for_agent(
+        AgentName.SIGNAL_SCOUT,
+        settings=Settings.model_construct(
+            serper_api_key=None,
+            reddit_client_id=SecretStr("id"),
+            reddit_client_secret=SecretStr("secret"),
+        ),
+    )
+
+    names = {tool.name for tool in bundle}
+    assert "reddit_search" in names
+    assert "reddit_fetch" in names

@@ -67,6 +67,7 @@ def build_prompt(
     agent_id: str,
     context: dict[str, Any],
     settings: Settings | None = None,
+    available_tool_names: set[str] | None = None,
 ) -> PromptBundle:
     prompt_root = Path(__file__).resolve().parent
     agent_name = AgentName(agent_id)
@@ -76,14 +77,24 @@ def build_prompt(
         _read_text(prompt_root / "shared" / file_name) for file_name in _SHARED_FILES
     ]
     role_text = _read_text(prompt_root / "agents" / agent_id / "role.md")
+    founder_constraints_section = _build_founder_constraints_section(
+        context.get("founder_constraints")
+    )
     output_contract = context.get("output_contract")
+    tools = tool_bundle_for_agent(
+        agent_name,
+        settings=active_settings,
+        available_tool_names=available_tool_names,
+    )
+    role_text = _adapt_role_text(role_text, {tool.name for tool in tools})
 
     system_sections = [
         "# Truth Engine V0.1",
         *shared_sections,
         "## Agent Role",
         role_text,
-        _build_tool_manifest(agent_name),
+        founder_constraints_section,
+        _build_tool_manifest(tools),
         _build_output_contract_section(output_contract),
     ]
     system_prompt = "\n\n".join(section.strip() for section in system_sections if section.strip())
@@ -149,8 +160,7 @@ def _build_user_prompt(*, agent_id: str, context: dict[str, Any]) -> str:
     return "\n\n".join(sections)
 
 
-def _build_tool_manifest(agent_name: AgentName) -> str:
-    tools = tool_bundle_for_agent(agent_name)
+def _build_tool_manifest(tools: tuple[Any, ...]) -> str:
     if not tools:
         return (
             "## Allowed Tools\n"
@@ -165,6 +175,110 @@ def _build_tool_manifest(agent_name: AgentName) -> str:
             f"(side_effect={tool.side_effect_level.value}, cost={tool.cost_class.value})"
         )
     return "\n".join(lines)
+
+
+def _build_founder_constraints_section(founder_constraints: Any) -> str:
+    normalized = _normalize_for_prompt(founder_constraints)
+    if not isinstance(normalized, dict) or not normalized:
+        return ""
+
+    lines = [
+        "## Founder Constraint Interpretation",
+        (
+            "Treat the founder constraints as constraints on the solution we build, "
+            "not on the customer's industry."
+        ),
+    ]
+
+    v1_filter = normalized.get("v1_filter")
+    if v1_filter == "software_first":
+        lines.append(
+            "- `software_first` means the proposed outcome must be a software product, "
+            "software tool, or software-led automation."
+        )
+
+    solution_modalities = _format_constraint_list(normalized.get("solution_modalities"))
+    if solution_modalities:
+        lines.append(f"- Preferred solution modalities: {solution_modalities}.")
+
+    excluded_business_models = _format_constraint_list(normalized.get("excluded_business_models"))
+    if excluded_business_models:
+        lines.append(f"- Excluded business models: {excluded_business_models}.")
+
+    if normalized.get("target_market") == "any":
+        lines.append(
+            "- The target market is unrestricted. Restaurants, retail, healthcare, "
+            "logistics, construction, and other non-software verticals are valid "
+            "when the delivered solution is software."
+        )
+
+    lines.extend(
+        [
+            '- Valid example: "software for connecting restaurant owners with suppliers."',
+            '- Invalid example: "run a restaurant at this location."',
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _format_constraint_list(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return ""
+    return ", ".join(f"`{item}`" for item in value if isinstance(item, str) and item)
+
+
+def _adapt_role_text(role_text: str, available_tool_names: set[str]) -> str:
+    adapted = role_text
+    if "reddit_search" not in available_tool_names:
+        adapted = adapted.replace(
+            _ARENA_REDDIT_SEARCH_BLOCK,
+            _ARENA_WEB_ONLY_SEARCH_BLOCK,
+        )
+        adapted = adapted.replace(
+            _SIGNAL_REDDIT_LINE,
+            _SIGNAL_WEB_ONLY_LINE,
+        )
+        adapted = adapted.replace(
+            "4. Use `reddit_fetch` for Reddit threads with rich discussion.\n",
+            "",
+        )
+        adapted = adapted.replace(
+            "The ICP is reachable through public channels (Reddit, LinkedIn, email)",
+            "The ICP is reachable through public channels (LinkedIn, email, forums, communities)",
+        )
+    return adapted
+
+
+_ARENA_REDDIT_SEARCH_BLOCK = "\n".join(
+    [
+        "1. **Reddit** (`reddit_search`): subreddits where the ICP discusses operational pain,",
+        "tool complaints, workflow frustrations.",
+        "2. **Web search** (`search_web`): job postings for the ICP role",
+        "(reveals tooling and budget), industry forums, community discussions.",
+        "3. **Web search**: G2/Capterra/review sites for existing tools in the space",
+        "(reveals spend and dissatisfaction).",
+    ]
+)
+
+_ARENA_WEB_ONLY_SEARCH_BLOCK = "\n".join(
+    [
+        "Search breadth-first across public web sources in this priority order:",
+        "1. **Web search** (`search_web`): job postings for the ICP role",
+        "(reveals tooling and budget), industry forums, community discussions.",
+        "2. **Web search**: G2/Capterra/review sites for existing tools in the space",
+        "(reveals spend and dissatisfaction).",
+        "3. **Public communities** reachable from web search results when available.",
+    ]
+)
+
+_SIGNAL_REDDIT_LINE = (
+    "2. Use `search_web` and `reddit_search` to find relevant discussions, complaints, "
+    "tool reviews, job postings."
+)
+
+_SIGNAL_WEB_ONLY_LINE = (
+    "2. Use `search_web` to find relevant discussions, complaints, tool reviews, job postings."
+)
 
 
 def _build_output_contract_section(contract_name: Any) -> str:

@@ -5,13 +5,14 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import httpx
+from pydantic import SecretStr
 
 from truth_engine.adapters.search.serper import SerperSearchClient
 from truth_engine.config.settings import Settings
 
 
 def _settings_with_serper_key() -> Settings:
-    return Settings(serper_api_key="test-key")
+    return Settings(serper_api_key=SecretStr("test-key"))
 
 
 def test_serper_timeout_returns_structured_error() -> None:

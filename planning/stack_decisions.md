@@ -44,7 +44,7 @@ Alternatives considered:
 
 Future swap option: if trafilatura quality isn't sufficient, the extraction interface (`extract(url) → str`) can swap to Jina ReaderLM V2 API per-source without changing agent code.
 
-See `docs/scraping_strategy.md` for the full pipeline, source targets, and cost breakdown.
+See `scraping_strategy.md` for the full pipeline, source targets, and cost breakdown.
 
 ## Model Routing: Config, Not Code
 

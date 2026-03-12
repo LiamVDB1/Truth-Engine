@@ -26,7 +26,7 @@ class RepositoryToolRuntime:
         self.reddit_client = reddit_client
 
     def invoke(self, agent: AgentName, tool_name: str, payload: dict[str, Any]) -> Any:
-        allowed_tools = {tool.name for tool in tool_bundle_for_agent(agent)}
+        allowed_tools = self.permitted_tool_names(agent)
         if tool_name not in allowed_tools:
             raise PermissionError(f"{agent.value} is not allowed to call {tool_name}")
 
@@ -34,6 +34,22 @@ class RepositoryToolRuntime:
         if handler is None:
             raise KeyError(f"No handler registered for {tool_name}")
         return handler(payload)
+
+    def permitted_tool_names(self, agent: AgentName) -> set[str]:
+        return {tool.name for tool in tool_bundle_for_agent(agent)}
+
+    def available_tool_names(self, agent: AgentName) -> set[str]:
+        tool_names = self.permitted_tool_names(agent)
+        if self.search_client is None:
+            tool_names.discard("search_web")
+        if self.page_fetcher is None:
+            tool_names.discard("fetch_page")
+        if self.content_extractor is None:
+            tool_names.discard("extract_content")
+        if self.reddit_client is None:
+            tool_names.discard("reddit_search")
+            tool_names.discard("reddit_fetch")
+        return tool_names
 
     def _handle_create_arena_proposal(self, payload: dict[str, Any]) -> dict[str, str]:
         return self.repository.add_arena_proposal(

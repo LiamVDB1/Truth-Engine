@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,20 +32,15 @@ class FounderConstraints(BaseModel):
 
 
 class LiveRunRequest(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    candidate_id: str
-    focus: str
+    candidate_id: str = Field(default_factory=lambda: f"run_{uuid4().hex[:10]}")
     founder_constraints: FounderConstraints = Field(default_factory=FounderConstraints)
-    seed_queries: list[str] = Field(default_factory=list)
-    source_targets: list[str] = Field(
-        default_factory=lambda: ["reddit", "job_postings", "public_web"]
-    )
-    max_arena_proposals: int = Field(default=6, ge=1, le=8)
-    max_signals: int = Field(default=60, ge=10, le=200)
-    search_results_per_query: int = Field(default=5, ge=1, le=10)
-    notes: str | None = None
 
     @classmethod
     def from_path(cls, path: Path) -> LiveRunRequest:
         return cls.model_validate_json(path.read_text(encoding="utf-8"))
+
+    @classmethod
+    def default(cls) -> LiveRunRequest:
+        return cls()

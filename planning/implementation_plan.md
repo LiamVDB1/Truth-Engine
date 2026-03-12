@@ -24,7 +24,7 @@ This repository is still a design repository, not a software repository.
 
 That means the first milestone is not "implement agents". The first milestone is "make the system shape executable."
 
-Before code starts, implementation-specific ambiguities are frozen in `docs/implementation_contract.md`.
+Before code starts, implementation-specific ambiguities are frozen in `implementation_contract.md`.
 
 ## Recommended MVP Boundary
 
@@ -341,7 +341,7 @@ The implementation plan is the target. The repo also needs a living operational 
 
 Recommended file:
 
-- `docs/build_state.md`
+- `build_state.md`
 
 Recommended sections:
 
