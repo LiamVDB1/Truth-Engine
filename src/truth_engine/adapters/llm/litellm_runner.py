@@ -5,14 +5,17 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
+from truth_engine.adapters.db.repositories import TruthEngineRepository
 from truth_engine.config.model_routing import resolve_agent_model
 from truth_engine.config.settings import Settings
+from truth_engine.contracts.checkpoints import AgentCheckpointRecord, AgentCheckpointState
 from truth_engine.contracts.stages import ActivityMetrics
-from truth_engine.domain.enums import AgentName
+from truth_engine.domain.enums import AgentCheckpointStatus, AgentName, Stage
 from truth_engine.prompts.builder import PromptBundle
 from truth_engine.services.logging import debug_json_repair, debug_llm_call, log_tool_exec
 from truth_engine.services.run_trace import RunTraceWriter
@@ -31,12 +34,14 @@ class LiteLLMAgentRunner:
         self,
         settings: Settings,
         *,
+        repository: TruthEngineRepository | None = None,
         completion_fn: Callable[..., Any] | None = None,
         proxy_completion_fn: Callable[..., Any] | None = None,
         cost_calculator: Callable[[Any, str], float] | None = None,
         trace_writer: RunTraceWriter | None = None,
     ):
         self.settings = settings
+        self.repository = repository
         self._completion_fn = completion_fn
         self._proxy_completion_fn = proxy_completion_fn
         self._cost_calculator = cost_calculator
@@ -52,152 +57,82 @@ class LiteLLMAgentRunner:
         tools: list[dict[str, Any]] | None,
         tool_executor: Callable[[str, dict[str, Any]], Any] | None,
         required_tool_names: set[str] | None = None,
+        checkpoint_candidate_id: str | None = None,
+        checkpoint_stage: Stage | None = None,
+        checkpoint_attempt_index: int = 0,
     ) -> AgentExecution[T]:
         _configure_litellm_runtime()
         model = resolve_agent_model(agent, self.settings)
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": prompt.system_prompt},
-            {"role": "user", "content": prompt.user_prompt},
-        ]
-
-        input_tokens = 0
-        output_tokens = 0
-        cost_eur = 0.0
-        tool_calls = 0
-        tool_rounds_used = 0
-        repair_attempts = 0
-        finalization_prompt_sent = False
-        seen_tool_signatures: dict[str, int] = {}
-        executed_tool_names: set[str] = set()
         required_tools = required_tool_names or set()
+        checkpoint = self._load_checkpoint(
+            candidate_id=checkpoint_candidate_id,
+            stage=checkpoint_stage,
+            agent=agent,
+            attempt_index=checkpoint_attempt_index,
+            prompt_hash=prompt.prompt_hash,
+        )
+        if checkpoint is not None and checkpoint.status is AgentCheckpointStatus.COMPLETED:
+            result_payload = checkpoint.state.result_payload
+            if result_payload is None:
+                raise ValueError("Completed agent checkpoint is missing a result payload.")
+            return AgentExecution(
+                result=response_model.model_validate(result_payload),
+                metrics=checkpoint.state.metrics(),
+            )
+
+        if checkpoint is None:
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": prompt.system_prompt},
+                {"role": "user", "content": prompt.user_prompt},
+            ]
+            input_tokens = 0
+            output_tokens = 0
+            cost_eur = 0.0
+            tool_calls = 0
+            tool_rounds_used = 0
+            repair_attempts = 0
+            finalization_prompt_sent = False
+            seen_tool_signatures: dict[str, int] = {}
+            executed_tool_names: set[str] = set()
+            pending_tool_calls: list[dict[str, Any]] = []
+            pending_tool_index = 0
+        else:
+            state = checkpoint.state
+            messages = list(state.messages)
+            input_tokens = state.input_tokens
+            output_tokens = state.output_tokens
+            cost_eur = state.cost_eur
+            tool_calls = state.tool_calls
+            tool_rounds_used = state.tool_rounds_used
+            repair_attempts = state.repair_attempts
+            finalization_prompt_sent = state.finalization_prompt_sent
+            seen_tool_signatures = dict(state.seen_tool_signatures)
+            executed_tool_names = set(state.executed_tool_names)
+            pending_tool_calls = list(state.pending_tool_calls)
+            pending_tool_index = state.pending_tool_index
 
         max_rounds = self.settings.agent_max_tool_rounds + self.settings.llm_max_retries + 1
-        for _round in range(max_rounds):
-            tool_choice: str | None = None
-            if tools is not None:
-                if tool_rounds_used < self.settings.agent_max_tool_rounds:
-                    tool_choice = "auto"
-                else:
-                    tool_choice = "none"
-                    if not finalization_prompt_sent:
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Tool budget is exhausted. Return the final JSON output now. "
-                                    "Do not call any more tools."
-                                ),
-                            }
-                        )
-                        finalization_prompt_sent = True
-            if self.trace_writer is not None:
-                self.trace_writer.llm_round(
-                    agent=agent.value,
-                    model=model,
-                    round_num=_round + 1,
-                    prompt=prompt if _round == 0 else None,
-                    tool_choice=tool_choice,
-                    tool_names=_tool_names(tools),
-                )
-            request_kwargs: dict[str, Any] = {
-                "model": model,
-                "messages": messages,
-                "tools": tools,
-                "tool_choice": tool_choice,
-                "temperature": self.settings.llm_temperature,
-                "max_retries": self.settings.llm_max_retries,
-            }
-            response = self._request_completion(
-                model=model,
-                request_kwargs=request_kwargs,
-                response_model=response_model,
-            )
-            input_tokens += int(_usage_value(response, "prompt_tokens"))
-            output_tokens += int(_usage_value(response, "completion_tokens"))
-            round_cost = self._completion_cost(response, model, request_kwargs)
-            cost_eur += round_cost
-
-            message = _choice_message(response)
-            parsed_tool_calls = _message_tool_calls(message)
-            if parsed_tool_calls:
+        completion_rounds_used = 0
+        while completion_rounds_used < max_rounds:
+            if pending_tool_calls:
                 if tool_executor is None:
                     raise ValueError("Tool calls were returned without a tool executor.")
-                tool_rounds_used += 1
-                messages.append(_assistant_message_payload(message))
-                for tool_call in parsed_tool_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    tool_name = tool_call["function"]["name"]
-                    tool_signature = _tool_signature(tool_name, arguments)
-                    if self.trace_writer is not None:
-                        self.trace_writer.tool_call(
-                            agent=agent.value,
-                            round_num=_round + 1,
-                            tool_name=tool_name,
-                            arguments=arguments,
-                        )
-                    seen_count = seen_tool_signatures.get(tool_signature, 0)
-                    if seen_count >= 1:
-                        tool_result = {
-                            "status": "duplicate_call_blocked",
-                            "tool": tool_name,
-                            "reason": (
-                                "This exact tool call was already executed. "
-                                "Review the prior result and finalize unless a materially "
-                                "different call is necessary."
-                            ),
-                        }
-                        log_tool_exec(
-                            agent.value,
-                            tool_name,
-                            "duplicate_call_blocked",
-                            arguments=arguments,
-                        )
-                    else:
-                        try:
-                            tool_result = tool_executor(tool_name, arguments)
-                        except Exception as error:
-                            log_tool_exec(agent.value, tool_name, "error", arguments=arguments)
-                            if self.trace_writer is not None:
-                                self.trace_writer.tool_result(
-                                    agent=agent.value,
-                                    round_num=_round + 1,
-                                    tool_name=tool_name,
-                                    result={"error": str(error)},
-                                    status="error",
-                                )
-                            raise
-                        tool_status = (
-                            str(tool_result.get("status", "ok"))
-                            if isinstance(tool_result, dict)
-                            else "ok"
-                        )
-                        log_tool_exec(
-                            agent.value,
-                            tool_name,
-                            tool_status,
-                            arguments=arguments,
-                        )
-                    seen_tool_signatures[tool_signature] = seen_count + 1
-                    executed_tool_names.add(tool_name)
-                    tool_calls += 1
-                    if self.trace_writer is not None:
-                        self.trace_writer.tool_result(
-                            agent=agent.value,
-                            round_num=_round + 1,
-                            tool_name=tool_name,
-                            result=tool_result,
-                            status=str(tool_result.get("status", "ok"))
-                            if isinstance(tool_result, dict)
-                            else "ok",
-                        )
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "name": tool_name,
-                            "content": json.dumps(tool_result, ensure_ascii=True),
-                        }
-                    )
+                (
+                    messages,
+                    tool_calls,
+                    pending_tool_calls,
+                    pending_tool_index,
+                ) = self._process_pending_tool_calls(
+                    agent=agent,
+                    round_num=max(1, completion_rounds_used),
+                    messages=messages,
+                    tool_executor=tool_executor,
+                    pending_tool_calls=pending_tool_calls,
+                    pending_tool_index=pending_tool_index,
+                    seen_tool_signatures=seen_tool_signatures,
+                    executed_tool_names=executed_tool_names,
+                    tool_calls=tool_calls,
+                )
                 missing_required_tools = sorted(required_tools - executed_tool_names)
                 if (
                     missing_required_tools
@@ -223,10 +158,130 @@ class LiteLLMAgentRunner:
                             ),
                         }
                     )
+                self._store_checkpoint(
+                    candidate_id=checkpoint_candidate_id,
+                    stage=checkpoint_stage,
+                    agent=agent,
+                    attempt_index=checkpoint_attempt_index,
+                    prompt=prompt,
+                    model_alias=model,
+                    response_model=response_model,
+                    status=AgentCheckpointStatus.IN_PROGRESS,
+                    messages=messages,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_eur=cost_eur,
+                    tool_calls=tool_calls,
+                    tool_rounds_used=tool_rounds_used,
+                    repair_attempts=repair_attempts,
+                    finalization_prompt_sent=finalization_prompt_sent,
+                    seen_tool_signatures=seen_tool_signatures,
+                    executed_tool_names=executed_tool_names,
+                    pending_tool_calls=pending_tool_calls,
+                    pending_tool_index=pending_tool_index,
+                )
+                continue
+
+            tool_choice: str | None = None
+            if tools is not None:
+                if tool_rounds_used < self.settings.agent_max_tool_rounds:
+                    tool_choice = "auto"
+                else:
+                    tool_choice = "none"
+                    if not finalization_prompt_sent:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Tool budget is exhausted. Return the final JSON output now. "
+                                    "Do not call any more tools."
+                                ),
+                            }
+                        )
+                        finalization_prompt_sent = True
+                        self._store_checkpoint(
+                            candidate_id=checkpoint_candidate_id,
+                            stage=checkpoint_stage,
+                            agent=agent,
+                            attempt_index=checkpoint_attempt_index,
+                            prompt=prompt,
+                            model_alias=model,
+                            response_model=response_model,
+                            status=AgentCheckpointStatus.IN_PROGRESS,
+                            messages=messages,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            cost_eur=cost_eur,
+                            tool_calls=tool_calls,
+                            tool_rounds_used=tool_rounds_used,
+                            repair_attempts=repair_attempts,
+                            finalization_prompt_sent=finalization_prompt_sent,
+                            seen_tool_signatures=seen_tool_signatures,
+                            executed_tool_names=executed_tool_names,
+                            pending_tool_calls=pending_tool_calls,
+                            pending_tool_index=pending_tool_index,
+                        )
+            completion_rounds_used += 1
+            if self.trace_writer is not None:
+                self.trace_writer.llm_round(
+                    agent=agent.value,
+                    model=model,
+                    round_num=completion_rounds_used,
+                    prompt=prompt if completion_rounds_used == 1 and checkpoint is None else None,
+                    tool_choice=tool_choice,
+                    tool_names=_tool_names(tools),
+                )
+            request_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "temperature": self.settings.llm_temperature,
+                "max_retries": self.settings.llm_max_retries,
+            }
+            response = self._request_completion(
+                model=model,
+                request_kwargs=request_kwargs,
+                response_model=response_model,
+            )
+            input_tokens += int(_usage_value(response, "prompt_tokens"))
+            output_tokens += int(_usage_value(response, "completion_tokens"))
+            round_cost = self._completion_cost(response, model, request_kwargs)
+            cost_eur += round_cost
+
+            message = _choice_message(response)
+            parsed_tool_calls = _message_tool_calls(message)
+            if parsed_tool_calls:
+                tool_rounds_used += 1
+                messages.append(_assistant_message_payload(message))
+                pending_tool_calls = parsed_tool_calls
+                pending_tool_index = 0
+                self._store_checkpoint(
+                    candidate_id=checkpoint_candidate_id,
+                    stage=checkpoint_stage,
+                    agent=agent,
+                    attempt_index=checkpoint_attempt_index,
+                    prompt=prompt,
+                    model_alias=model,
+                    response_model=response_model,
+                    status=AgentCheckpointStatus.IN_PROGRESS,
+                    messages=messages,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_eur=cost_eur,
+                    tool_calls=tool_calls,
+                    tool_rounds_used=tool_rounds_used,
+                    repair_attempts=repair_attempts,
+                    finalization_prompt_sent=finalization_prompt_sent,
+                    seen_tool_signatures=seen_tool_signatures,
+                    executed_tool_names=executed_tool_names,
+                    pending_tool_calls=pending_tool_calls,
+                    pending_tool_index=pending_tool_index,
+                )
                 debug_llm_call(
                     agent.value,
                     model,
-                    round_num=_round + 1,
+                    round_num=completion_rounds_used,
                     input_tokens=int(_usage_value(response, "prompt_tokens")),
                     output_tokens=int(_usage_value(response, "completion_tokens")),
                     cost_eur=round_cost,
@@ -239,7 +294,7 @@ class LiteLLMAgentRunner:
                 self.trace_writer.llm_response(
                     agent=agent.value,
                     model=model,
-                    round_num=_round + 1,
+                    round_num=completion_rounds_used,
                     content=content,
                 )
             try:
@@ -268,24 +323,68 @@ class LiteLLMAgentRunner:
                             ),
                         }
                     )
+                    self._store_checkpoint(
+                        candidate_id=checkpoint_candidate_id,
+                        stage=checkpoint_stage,
+                        agent=agent,
+                        attempt_index=checkpoint_attempt_index,
+                        prompt=prompt,
+                        model_alias=model,
+                        response_model=response_model,
+                        status=AgentCheckpointStatus.IN_PROGRESS,
+                        messages=messages,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost_eur=cost_eur,
+                        tool_calls=tool_calls,
+                        tool_rounds_used=tool_rounds_used,
+                        repair_attempts=repair_attempts,
+                        finalization_prompt_sent=finalization_prompt_sent,
+                        seen_tool_signatures=seen_tool_signatures,
+                        executed_tool_names=executed_tool_names,
+                        pending_tool_calls=pending_tool_calls,
+                        pending_tool_index=pending_tool_index,
+                    )
                     continue
+                metrics = ActivityMetrics(
+                    cost_eur=round(cost_eur, 6),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    tool_calls=tool_calls,
+                )
                 debug_llm_call(
                     agent.value,
                     model,
-                    round_num=_round + 1,
+                    round_num=completion_rounds_used,
                     input_tokens=int(_usage_value(response, "prompt_tokens")),
                     output_tokens=int(_usage_value(response, "completion_tokens")),
                     cost_eur=round_cost,
                 )
-                return AgentExecution(
-                    result=parsed,
-                    metrics=ActivityMetrics(
-                        cost_eur=round(cost_eur, 6),
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        tool_calls=tool_calls,
-                    ),
+                self._store_checkpoint(
+                    candidate_id=checkpoint_candidate_id,
+                    stage=checkpoint_stage,
+                    agent=agent,
+                    attempt_index=checkpoint_attempt_index,
+                    prompt=prompt,
+                    model_alias=model,
+                    response_model=response_model,
+                    status=AgentCheckpointStatus.COMPLETED,
+                    messages=messages,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_eur=cost_eur,
+                    tool_calls=tool_calls,
+                    tool_rounds_used=tool_rounds_used,
+                    repair_attempts=repair_attempts,
+                    finalization_prompt_sent=finalization_prompt_sent,
+                    seen_tool_signatures=seen_tool_signatures,
+                    executed_tool_names=executed_tool_names,
+                    pending_tool_calls=pending_tool_calls,
+                    pending_tool_index=pending_tool_index,
+                    result_payload=parsed.model_dump(mode="json"),
+                    metrics=metrics,
                 )
+                return AgentExecution(result=parsed, metrics=metrics)
             except (ValidationError, ValueError, json.JSONDecodeError) as error:
                 if repair_attempts >= self.settings.llm_max_retries:
                     raise ValueError(
@@ -310,11 +409,208 @@ class LiteLLMAgentRunner:
                         ),
                     }
                 )
+                self._store_checkpoint(
+                    candidate_id=checkpoint_candidate_id,
+                    stage=checkpoint_stage,
+                    agent=agent,
+                    attempt_index=checkpoint_attempt_index,
+                    prompt=prompt,
+                    model_alias=model,
+                    response_model=response_model,
+                    status=AgentCheckpointStatus.IN_PROGRESS,
+                    messages=messages,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_eur=cost_eur,
+                    tool_calls=tool_calls,
+                    tool_rounds_used=tool_rounds_used,
+                    repair_attempts=repair_attempts,
+                    finalization_prompt_sent=finalization_prompt_sent,
+                    seen_tool_signatures=seen_tool_signatures,
+                    executed_tool_names=executed_tool_names,
+                    pending_tool_calls=pending_tool_calls,
+                    pending_tool_index=pending_tool_index,
+                )
 
         raise RuntimeError(
             f"{agent.value} exceeded the allowed completion rounds "
             f"after {tool_rounds_used} tool rounds and {tool_calls} tool calls."
         )
+
+    def _load_checkpoint(
+        self,
+        *,
+        candidate_id: str | None,
+        stage: Stage | None,
+        agent: AgentName,
+        attempt_index: int,
+        prompt_hash: str,
+    ) -> AgentCheckpointRecord | None:
+        if self.repository is None or candidate_id is None or stage is None:
+            return None
+        checkpoint = self.repository.load_agent_checkpoint(
+            candidate_id=candidate_id,
+            stage=stage,
+            agent=agent,
+            attempt_index=attempt_index,
+        )
+        if checkpoint is None:
+            return None
+        if checkpoint.prompt_hash != prompt_hash:
+            return None
+        return checkpoint
+
+    def _store_checkpoint(
+        self,
+        *,
+        candidate_id: str | None,
+        stage: Stage | None,
+        agent: AgentName,
+        attempt_index: int,
+        prompt: PromptBundle,
+        model_alias: str,
+        response_model: type[BaseModel],
+        status: AgentCheckpointStatus,
+        messages: list[dict[str, Any]],
+        input_tokens: int,
+        output_tokens: int,
+        cost_eur: float,
+        tool_calls: int,
+        tool_rounds_used: int,
+        repair_attempts: int,
+        finalization_prompt_sent: bool,
+        seen_tool_signatures: dict[str, int],
+        executed_tool_names: set[str],
+        pending_tool_calls: list[dict[str, Any]],
+        pending_tool_index: int,
+        result_payload: dict[str, Any] | None = None,
+        metrics: ActivityMetrics | None = None,
+    ) -> None:
+        if self.repository is None or candidate_id is None or stage is None:
+            return
+        now = _now_utc()
+        self.repository.store_agent_checkpoint(
+            AgentCheckpointRecord(
+                candidate_id=candidate_id,
+                stage=stage,
+                agent=agent,
+                attempt_index=attempt_index,
+                status=status,
+                prompt_version=prompt.prompt_version,
+                prompt_hash=prompt.prompt_hash,
+                model_alias=model_alias,
+                response_model=response_model.__name__,
+                state=AgentCheckpointState(
+                    messages=messages,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_eur=round(cost_eur, 6),
+                    tool_calls=tool_calls,
+                    tool_rounds_used=tool_rounds_used,
+                    repair_attempts=repair_attempts,
+                    finalization_prompt_sent=finalization_prompt_sent,
+                    seen_tool_signatures=seen_tool_signatures,
+                    executed_tool_names=sorted(executed_tool_names),
+                    pending_tool_calls=pending_tool_calls,
+                    pending_tool_index=pending_tool_index,
+                    result_payload=result_payload,
+                    metrics_payload=metrics.model_dump(mode="json") if metrics else None,
+                ),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    def _process_pending_tool_calls(
+        self,
+        *,
+        agent: AgentName,
+        round_num: int,
+        messages: list[dict[str, Any]],
+        tool_executor: Callable[[str, dict[str, Any]], Any],
+        pending_tool_calls: list[dict[str, Any]],
+        pending_tool_index: int,
+        seen_tool_signatures: dict[str, int],
+        executed_tool_names: set[str],
+        tool_calls: int,
+    ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], int]:
+        while pending_tool_index < len(pending_tool_calls):
+            tool_call = pending_tool_calls[pending_tool_index]
+            arguments = json.loads(tool_call["function"]["arguments"])
+            tool_name = tool_call["function"]["name"]
+            tool_signature = _tool_signature(tool_name, arguments)
+            if self.trace_writer is not None:
+                self.trace_writer.tool_call(
+                    agent=agent.value,
+                    round_num=round_num,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+            seen_count = seen_tool_signatures.get(tool_signature, 0)
+            if seen_count >= 1:
+                tool_result = {
+                    "status": "duplicate_call_blocked",
+                    "tool": tool_name,
+                    "reason": (
+                        "This exact tool call was already executed. "
+                        "Review the prior result and finalize unless a materially "
+                        "different call is necessary."
+                    ),
+                }
+                log_tool_exec(
+                    agent.value,
+                    tool_name,
+                    "duplicate_call_blocked",
+                    arguments=arguments,
+                )
+            else:
+                try:
+                    tool_result = tool_executor(tool_name, arguments)
+                except Exception as error:
+                    log_tool_exec(agent.value, tool_name, "error", arguments=arguments)
+                    if self.trace_writer is not None:
+                        self.trace_writer.tool_result(
+                            agent=agent.value,
+                            round_num=round_num,
+                            tool_name=tool_name,
+                            result={"error": str(error)},
+                            status="error",
+                        )
+                    raise
+                tool_status = (
+                    str(tool_result.get("status", "ok"))
+                    if isinstance(tool_result, dict)
+                    else "ok"
+                )
+                log_tool_exec(
+                    agent.value,
+                    tool_name,
+                    tool_status,
+                    arguments=arguments,
+                )
+            seen_tool_signatures[tool_signature] = seen_count + 1
+            executed_tool_names.add(tool_name)
+            tool_calls += 1
+            if self.trace_writer is not None:
+                self.trace_writer.tool_result(
+                    agent=agent.value,
+                    round_num=round_num,
+                    tool_name=tool_name,
+                    result=tool_result,
+                    status=str(tool_result.get("status", "ok"))
+                    if isinstance(tool_result, dict)
+                    else "ok",
+                )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "name": tool_name,
+                    "content": json.dumps(tool_result, ensure_ascii=True),
+                }
+            )
+            pending_tool_index += 1
+        return messages, tool_calls, [], 0
 
     def _completion(self, model: str) -> Callable[..., Any]:
         if self._completion_fn is not None:
@@ -650,3 +946,7 @@ def _configure_litellm_runtime() -> None:
     logging.getLogger("LiteLLM").setLevel(logging.ERROR)
     logging.getLogger("LiteLLM Router").setLevel(logging.ERROR)
     logging.getLogger("LiteLLM Proxy").setLevel(logging.ERROR)
+
+
+def _now_utc() -> datetime:
+    return datetime.now(UTC)

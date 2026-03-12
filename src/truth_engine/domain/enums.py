@@ -66,6 +66,23 @@ class GateAction(StrEnum):
     KILL = "kill"
 
 
+class WorkflowStep(StrEnum):
+    ARENA_DISCOVERY = "arena_discovery"
+    SIGNAL_MINING = "signal_mining"
+    NORMALIZATION = "normalization"
+    LANDSCAPE_RESEARCH = "landscape_research"
+    SCORING = "scoring"
+    SKEPTIC = "skeptic"
+    WEDGE_DESIGN = "wedge_design"
+    WEDGE_CRITIQUE = "wedge_critique"
+    CHANNEL_VALIDATION = "channel_validation"
+
+
+class AgentCheckpointStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
 class ToolSideEffectLevel(StrEnum):
     READ_ONLY = "read_only"
     WRITE = "write"

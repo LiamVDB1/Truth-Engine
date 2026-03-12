@@ -183,7 +183,7 @@ def test_add_signal_normalizes_source_type_caps_reliability_and_spend(tmp_path: 
     assert stored_signal.proof_of_spend is False
 
 
-def test_add_landscape_entry_returns_invalid_instead_of_crashing_on_schema_errors(
+def test_add_landscape_entry_coerces_string_lists_instead_of_crashing(
     tmp_path: Path,
 ) -> None:
     from truth_engine.adapters.db.migrate import upgrade_database
@@ -216,5 +216,8 @@ def test_add_landscape_entry_returns_invalid_instead_of_crashing_on_schema_error
         },
     )
 
-    assert result["status"] == "invalid"
-    assert "strengths" in result["reason"]
+    assert result["status"] == "created"
+    stored_entries = repository.list_landscape_entries("cand_landscape")
+    assert len(stored_entries) == 1
+    assert stored_entries[0].strengths == ["Fast onboarding"]
+    assert stored_entries[0].weaknesses == ["Thin analytics"]

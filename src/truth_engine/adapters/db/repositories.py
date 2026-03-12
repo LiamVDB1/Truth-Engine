@@ -8,16 +8,29 @@ from uuid import uuid4
 from sqlalchemy import Engine, create_engine, delete, func, insert, select, update
 from sqlalchemy.engine import Connection, RowMapping
 
+from truth_engine.contracts.checkpoints import (
+    AgentCheckpointRecord,
+    CandidateStageRunRecord,
+    WorkflowCheckpoint,
+)
 from truth_engine.contracts.models import CostRecord, ProblemUnit, RawArena, RawSignal
 from truth_engine.contracts.stages import (
+    ActivityMetrics,
     CandidateDossier,
     CandidateRecord,
     DecisionEvent,
     LandscapeEntry,
 )
-from truth_engine.domain.enums import AgentName, GateAction, Stage
+from truth_engine.domain.enums import (
+    AgentCheckpointStatus,
+    AgentName,
+    GateAction,
+    Stage,
+    WorkflowStep,
+)
 
 from .schema import (
+    agent_checkpoint_table,
     candidate_stage_run_table,
     candidate_table,
     channel_plan_table,
@@ -32,6 +45,7 @@ from .schema import (
     raw_arena_table,
     raw_signal_table,
     wedge_hypothesis_table,
+    workflow_checkpoint_table,
 )
 
 
@@ -46,7 +60,13 @@ class TruthEngineRepository:
     def create_schema(self) -> None:
         metadata.create_all(self.engine)
 
-    def create_candidate(self, candidate_id: str, status: str) -> None:
+    def create_candidate(
+        self,
+        candidate_id: str,
+        status: str,
+        *,
+        request_payload: dict[str, Any] | None = None,
+    ) -> None:
         now = _utc_now()
         payload = {
             "candidate_id": candidate_id,
@@ -58,6 +78,7 @@ class TruthEngineRepository:
             "selected_wedge_id": None,
             "total_cost_eur": 0.0,
             "dossier_payload": None,
+            "request_payload": request_payload,
             "created_at": now,
             "updated_at": now,
         }
@@ -101,6 +122,18 @@ class TruthEngineRepository:
         arena_id = arena.id or _new_id("arena")
         now = _utc_now()
         with self.engine.begin() as connection:
+            existing_match = (
+                connection.execute(
+                    select(raw_arena_table.c.id).where(
+                        raw_arena_table.c.candidate_id == candidate_id,
+                        raw_arena_table.c.fingerprint == arena.fingerprint(),
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if existing_match is not None:
+                return {"status": "exists", "arena_id": str(existing_match)}
             killed_match = connection.execute(
                 select(raw_arena_table.c.id).where(
                     raw_arena_table.c.fingerprint == arena.fingerprint(),
@@ -445,6 +478,31 @@ class TruthEngineRepository:
                     )
                 )
 
+    def list_wedges(self, candidate_id: str) -> list[dict[str, Any]]:
+        with self.engine.begin() as connection:
+            rows = (
+                connection.execute(
+                    select(wedge_hypothesis_table.c.payload)
+                    .where(wedge_hypothesis_table.c.candidate_id == candidate_id)
+                    .order_by(wedge_hypothesis_table.c.updated_at, wedge_hypothesis_table.c.id)
+                )
+                .scalars()
+                .all()
+            )
+        return [dict(row) for row in rows]
+
+    def get_selected_wedge(self, candidate_id: str) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            payload = connection.execute(
+                select(wedge_hypothesis_table.c.payload).where(
+                    wedge_hypothesis_table.c.candidate_id == candidate_id,
+                    wedge_hypothesis_table.c.is_selected.is_(True),
+                )
+            ).scalar_one_or_none()
+        if payload is None:
+            return None
+        return dict(payload)
+
     def replace_channel_plans(
         self, candidate_id: str, attempt_index: int, channel_payloads: list[dict[str, Any]]
     ) -> None:
@@ -506,6 +564,104 @@ class TruthEngineRepository:
             for row in rows
         ]
 
+    def get_decision_event(
+        self,
+        candidate_id: str,
+        stage: Stage,
+        iteration: int,
+    ) -> DecisionEvent | None:
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(decision_event_table)
+                    .where(
+                        decision_event_table.c.candidate_id == candidate_id,
+                        decision_event_table.c.stage == stage.value,
+                        decision_event_table.c.iteration == iteration,
+                    )
+                    .order_by(
+                        decision_event_table.c.created_at.desc(),
+                        decision_event_table.c.id.desc(),
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return DecisionEvent(
+            candidate_id=row["candidate_id"],
+            stage=Stage(row["stage"]),
+            action=GateAction(row["action"]),
+            reason=row["reason"],
+            iteration=row["iteration"],
+            metadata=row["metadata"],
+            timestamp=row["created_at"],
+        )
+
+    def store_workflow_checkpoint(
+        self,
+        *,
+        candidate_id: str,
+        step: WorkflowStep,
+        attempt_index: int,
+        payload: dict[str, Any],
+    ) -> None:
+        now = _utc_now()
+        checkpoint_id = _workflow_checkpoint_id(candidate_id, step, attempt_index)
+        with self.engine.begin() as connection:
+            existing = connection.execute(
+                select(workflow_checkpoint_table.c.id).where(
+                    workflow_checkpoint_table.c.id == checkpoint_id
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                connection.execute(
+                    insert(workflow_checkpoint_table).values(
+                        id=checkpoint_id,
+                        candidate_id=candidate_id,
+                        step=step.value,
+                        attempt_index=attempt_index,
+                        payload=payload,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                return
+            connection.execute(
+                update(workflow_checkpoint_table)
+                .where(workflow_checkpoint_table.c.id == checkpoint_id)
+                .values(payload=payload, updated_at=now)
+            )
+
+    def load_workflow_checkpoint(
+        self,
+        candidate_id: str,
+        step: WorkflowStep,
+        attempt_index: int,
+    ) -> WorkflowCheckpoint | None:
+        checkpoint_id = _workflow_checkpoint_id(candidate_id, step, attempt_index)
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(workflow_checkpoint_table).where(
+                        workflow_checkpoint_table.c.id == checkpoint_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return WorkflowCheckpoint(
+            candidate_id=row["candidate_id"],
+            step=WorkflowStep(row["step"]),
+            attempt_index=row["attempt_index"],
+            payload=dict(row["payload"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def store_stage_run(
         self,
         *,
@@ -540,6 +696,59 @@ class TruthEngineRepository:
                 )
             )
 
+    def get_stage_run(
+        self,
+        candidate_id: str,
+        agent: AgentName,
+        attempt_index: int,
+    ) -> CandidateStageRunRecord | None:
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(candidate_stage_run_table)
+                    .where(
+                        candidate_stage_run_table.c.candidate_id == candidate_id,
+                        candidate_stage_run_table.c.agent == agent.value,
+                        candidate_stage_run_table.c.attempt_index == attempt_index,
+                    )
+                    .order_by(
+                        candidate_stage_run_table.c.created_at.desc(),
+                        candidate_stage_run_table.c.id.desc(),
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return _stage_run_from_row(row)
+
+    def latest_stage_run(
+        self,
+        candidate_id: str,
+        agent: AgentName,
+    ) -> CandidateStageRunRecord | None:
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(candidate_stage_run_table)
+                    .where(
+                        candidate_stage_run_table.c.candidate_id == candidate_id,
+                        candidate_stage_run_table.c.agent == agent.value,
+                    )
+                    .order_by(
+                        candidate_stage_run_table.c.attempt_index.desc(),
+                        candidate_stage_run_table.c.created_at.desc(),
+                        candidate_stage_run_table.c.id.desc(),
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return _stage_run_from_row(row)
+
     def count_stage_runs(self, candidate_id: str, agent: AgentName | None = None) -> int:
         statement = (
             select(func.count())
@@ -551,6 +760,82 @@ class TruthEngineRepository:
         with self.engine.begin() as connection:
             count = connection.execute(statement).scalar_one()
         return int(count)
+
+    def store_agent_checkpoint(self, checkpoint: AgentCheckpointRecord) -> None:
+        checkpoint_id = _agent_checkpoint_id(
+            checkpoint.candidate_id,
+            checkpoint.stage,
+            checkpoint.agent,
+            checkpoint.attempt_index,
+        )
+        values = {
+            "candidate_id": checkpoint.candidate_id,
+            "stage": checkpoint.stage.value,
+            "agent": checkpoint.agent.value,
+            "attempt_index": checkpoint.attempt_index,
+            "status": checkpoint.status.value,
+            "prompt_version": checkpoint.prompt_version,
+            "prompt_hash": checkpoint.prompt_hash,
+            "model_alias": checkpoint.model_alias,
+            "response_model": checkpoint.response_model,
+            "state_payload": checkpoint.state.model_dump(mode="json"),
+            "updated_at": checkpoint.updated_at,
+        }
+        with self.engine.begin() as connection:
+            existing = connection.execute(
+                select(agent_checkpoint_table.c.id).where(
+                    agent_checkpoint_table.c.id == checkpoint_id
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                connection.execute(
+                    insert(agent_checkpoint_table).values(
+                        id=checkpoint_id,
+                        created_at=checkpoint.created_at,
+                        **values,
+                    )
+                )
+                return
+            connection.execute(
+                update(agent_checkpoint_table)
+                .where(agent_checkpoint_table.c.id == checkpoint_id)
+                .values(**values)
+            )
+
+    def load_agent_checkpoint(
+        self,
+        candidate_id: str,
+        stage: Stage,
+        agent: AgentName,
+        attempt_index: int,
+    ) -> AgentCheckpointRecord | None:
+        checkpoint_id = _agent_checkpoint_id(candidate_id, stage, agent, attempt_index)
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(agent_checkpoint_table).where(
+                        agent_checkpoint_table.c.id == checkpoint_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return AgentCheckpointRecord(
+            candidate_id=row["candidate_id"],
+            stage=Stage(row["stage"]),
+            agent=AgentName(row["agent"]),
+            attempt_index=row["attempt_index"],
+            status=AgentCheckpointStatus(row["status"]),
+            prompt_version=row["prompt_version"],
+            prompt_hash=row["prompt_hash"],
+            model_alias=row["model_alias"],
+            response_model=row["response_model"],
+            state=row["state_payload"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def record_cost(self, record: CostRecord) -> None:
         with self.engine.begin() as connection:
@@ -653,9 +938,43 @@ def _candidate_from_row(row: RowMapping) -> CandidateRecord:
         selected_wedge_id=row["selected_wedge_id"],
         total_cost_eur=float(row["total_cost_eur"]),
         dossier_payload=row["dossier_payload"],
+        request_payload=row.get("request_payload"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+def _stage_run_from_row(row: RowMapping) -> CandidateStageRunRecord:
+    return CandidateStageRunRecord(
+        candidate_id=row["candidate_id"],
+        stage=Stage(row["stage"]),
+        agent=AgentName(row["agent"]),
+        attempt_index=row["attempt_index"],
+        prompt_version=row["prompt_version"],
+        prompt_hash=row["prompt_hash"],
+        model_alias=row["model_alias"],
+        payload=dict(row["payload"]),
+        metrics=ActivityMetrics(
+            cost_eur=float(row["cost_eur"]),
+            input_tokens=int(row["input_tokens"]),
+            output_tokens=int(row["output_tokens"]),
+            tool_calls=int(row["tool_calls"]),
+        ),
+        created_at=row["created_at"],
+    )
+
+
+def _workflow_checkpoint_id(candidate_id: str, step: WorkflowStep, attempt_index: int) -> str:
+    return f"workflow:{candidate_id}:{step.value}:{attempt_index}"
+
+
+def _agent_checkpoint_id(
+    candidate_id: str,
+    stage: Stage,
+    agent: AgentName,
+    attempt_index: int,
+) -> str:
+    return f"agent:{candidate_id}:{stage.value}:{agent.value}:{attempt_index}"
 
 
 def _new_id(prefix: str) -> str:

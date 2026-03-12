@@ -70,11 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         upgrade_database(settings.database_url)
         repository = TruthEngineRepository.from_database_url(settings.database_url)
         tool_runtime = _build_live_tool_runtime(repository, settings)
-        request = (
-            LiveRunRequest.from_path(Path(args.request_file))
-            if args.request_file is not None
-            else LiveRunRequest.default()
-        )
+        request = _resolve_live_request(args, repository)
         trace_writer = RunTraceWriter.create(
             output_dir=Path(args.output_dir),
             candidate_id=request.candidate_id,
@@ -85,7 +81,11 @@ def main(argv: list[str] | None = None) -> int:
             request=request,
             repository=repository,
             settings=settings,
-            agent_runner=LiteLLMAgentRunner(settings=settings, trace_writer=trace_writer),
+            agent_runner=LiteLLMAgentRunner(
+                settings=settings,
+                repository=repository,
+                trace_writer=trace_writer,
+            ),
             tool_runtime=tool_runtime,
         )
         runner = CandidateWorkflowRunner(
@@ -148,6 +148,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     run_live = subparsers.add_parser("run-live")
     run_live.add_argument("--request-file")
+    run_live.add_argument("--candidate-id")
     run_live.add_argument("--database-url", default=default_settings.database_url)
     run_live.add_argument("--output-dir", default="./out")
     run_live.add_argument("--prompt-version", default="live-v1")
@@ -180,3 +181,23 @@ def _build_live_tool_runtime(
         content_extractor=fetch_client,
         reddit_client=reddit_client,
     )
+
+
+def _resolve_live_request(
+    args: argparse.Namespace,
+    repository: TruthEngineRepository,
+) -> LiveRunRequest:
+    if args.request_file is not None:
+        request = LiveRunRequest.from_path(Path(args.request_file))
+    elif args.candidate_id is not None:
+        candidate = repository.get_candidate(args.candidate_id)
+        if candidate is not None and candidate.request_payload is not None:
+            request = LiveRunRequest.model_validate(candidate.request_payload)
+        else:
+            request = LiveRunRequest(candidate_id=args.candidate_id)
+    else:
+        request = LiveRunRequest.default()
+
+    if args.candidate_id is not None and request.candidate_id != args.candidate_id:
+        request = request.model_copy(update={"candidate_id": args.candidate_id})
+    return request

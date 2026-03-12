@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import copy
 import logging
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from pydantic import SecretStr
 
+from truth_engine.adapters.db.migrate import upgrade_database
+from truth_engine.adapters.db.repositories import TruthEngineRepository
 from truth_engine.adapters.llm.litellm_runner import LiteLLMAgentRunner
 from truth_engine.config.settings import Settings
 from truth_engine.contracts.stages import ArenaSearchResult
-from truth_engine.domain.enums import AgentName
+from truth_engine.domain.enums import AgentName, Stage
 from truth_engine.prompts.builder import PromptBundle
 from truth_engine.services.logging import configure_logging
 from truth_engine.tools.schemas import tool_schemas_for_agent
@@ -81,12 +87,18 @@ class _ResponseFormatRejectingCompletion:
 
 
 def _reset_truth_engine_logger() -> None:
-    logger = logging.getLogger("truth_engine")
-    for handler in list(logger.handlers):
-        logger.removeHandler(handler)
-        handler.close()
-    logger.setLevel(logging.NOTSET)
-    logger.propagate = True
+    names = [
+        name
+        for name in logging.Logger.manager.loggerDict
+        if name == "truth_engine" or name.startswith("truth_engine.")
+    ]
+    for name in ["truth_engine", *sorted(names)]:
+        logger = logging.getLogger(name)
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
+        logger.setLevel(logging.NOTSET)
+        logger.propagate = True
 
 
 def test_litellm_runner_executes_tool_calls_and_parses_json() -> None:
@@ -384,6 +396,125 @@ def test_litellm_runner_prefers_response_cost_before_completion_cost() -> None:
         )
 
     assert execution.metrics.cost_eur == 0.12
+
+
+def test_litellm_runner_resumes_interrupted_tool_session_without_replaying_tools() -> None:
+    with TemporaryDirectory() as temp_dir:
+        database_path = Path(temp_dir) / "truth_engine.db"
+        database_url = f"sqlite:///{database_path}"
+        upgrade_database(database_url)
+        repository = TruthEngineRepository.from_database_url(database_url)
+        repository.create_schema()
+        repository.create_candidate("cand_resume_agent", status="running")
+
+        first_completion = _FakeCompletionSequence(
+            [
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "search_web",
+                                            "arguments": '{"query":"warehouse ops pain","limit":1}',
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 7},
+                }
+            ]
+        )
+        tool_invocations: list[tuple[str, dict[str, Any]]] = []
+
+        def interrupted_completion(**kwargs: Any) -> dict[str, Any]:
+            if first_completion._responses:
+                return first_completion(**kwargs)
+            raise RuntimeError("synthetic interruption")
+
+        def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, object]:
+            tool_invocations.append((name, arguments))
+            return {
+                "status": "ok",
+                "results": [{"title": "Ops pain", "url": "https://example.com"}],
+            }
+
+        prompt = PromptBundle(
+            system_prompt="system",
+            user_prompt="user",
+            prompt_version="v-test",
+            prompt_hash="resume123",
+        )
+
+        interrupted_runner = LiteLLMAgentRunner(
+            settings=Settings(database_url=database_url),
+            completion_fn=interrupted_completion,
+            cost_calculator=lambda _response, _model: 0.05,
+            repository=repository,
+        )
+
+        with pytest.raises(RuntimeError, match="synthetic interruption"):
+            interrupted_runner.run(
+                agent=AgentName.ARENA_SCOUT,
+                prompt=prompt,
+                response_model=ArenaSearchResult,
+                tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+                tool_executor=execute_tool,
+                checkpoint_candidate_id="cand_resume_agent",
+                checkpoint_stage=Stage.ARENA_DISCOVERY,
+                checkpoint_attempt_index=0,
+            )
+
+        resumed_completion = _FakeCompletionSequence(
+            [
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": (
+                                    '{"sources_searched":["serper"],'
+                                    '"search_summary":"Resumed without replaying the tool."}'
+                                ),
+                            }
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 13, "completion_tokens": 9},
+                }
+            ]
+        )
+        resumed_runner = LiteLLMAgentRunner(
+            settings=Settings(database_url=database_url),
+            completion_fn=resumed_completion,
+            cost_calculator=lambda _response, _model: 0.05,
+            repository=repository,
+        )
+
+        execution = resumed_runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=prompt,
+            response_model=ArenaSearchResult,
+            tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+            tool_executor=execute_tool,
+            checkpoint_candidate_id="cand_resume_agent",
+            checkpoint_stage=Stage.ARENA_DISCOVERY,
+            checkpoint_attempt_index=0,
+        )
+
+    assert execution.result.search_summary == "Resumed without replaying the tool."
+    assert tool_invocations == [("search_web", {"query": "warehouse ops pain", "limit": 1})]
+    assert execution.metrics.input_tokens == 24
+    assert execution.metrics.output_tokens == 16
+    assert execution.metrics.cost_eur == 0.1
+    assert resumed_completion.calls[0]["messages"][-1]["role"] == "tool"
+    assert "https://example.com" in resumed_completion.calls[0]["messages"][-1]["content"]
 
 
 def test_litellm_runner_forces_finalization_after_tool_budget() -> None:
@@ -712,9 +843,8 @@ def test_litellm_runner_suppresses_litellm_debug_info() -> None:
     assert fake_module.turn_off_message_logging is True
 
 
-def test_litellm_runner_logs_write_tool_calls_in_terminal_output(capsys: Any) -> None:
+def test_litellm_runner_logs_write_tool_calls_in_terminal_output() -> None:
     _reset_truth_engine_logger()
-    configure_logging("INFO")
     completion = _FakeCompletionSequence(
         [
             {
@@ -773,29 +903,35 @@ def test_litellm_runner_logs_write_tool_calls_in_terminal_output(capsys: Any) ->
         cost_calculator=lambda _response, _model: 0.0,
     )
 
-    runner.run(
-        agent=AgentName.ARENA_SCOUT,
-        prompt=PromptBundle(
-            system_prompt="system",
-            user_prompt="user",
-            prompt_version="v-test",
-            prompt_hash="abc123",
-        ),
-        response_model=ArenaSearchResult,
-        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
-        tool_executor=lambda _name, _arguments: {"status": "saved", "arena_id": "arena_123"},
-    )
+    with patch("truth_engine.adapters.llm.litellm_runner.log_tool_exec") as log_tool_exec_mock:
+        runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=PromptBundle(
+                system_prompt="system",
+                user_prompt="user",
+                prompt_version="v-test",
+                prompt_hash="abc123",
+            ),
+            response_model=ArenaSearchResult,
+            tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+            tool_executor=lambda _name, _arguments: {
+                "status": "saved",
+                "arena_id": "arena_123",
+            },
+        )
 
-    stderr = capsys.readouterr().err
-    assert "create_arena_proposal" in stderr
-    assert "cand_123" in stderr
-    assert "SAVED" in stderr
+    assert log_tool_exec_mock.call_count >= 1
+    assert (
+        "arena_scout",
+        "create_arena_proposal",
+        "saved",
+    ) == log_tool_exec_mock.call_args_list[0].args[:3]
+    assert log_tool_exec_mock.call_args_list[0].kwargs["arguments"]["candidate_id"] == "cand_123"
     _reset_truth_engine_logger()
 
 
-def test_litellm_runner_keeps_network_tool_logs_out_of_info_terminal_output(capsys: Any) -> None:
+def test_litellm_runner_keeps_network_tool_logs_out_of_info_terminal_output() -> None:
     _reset_truth_engine_logger()
-    configure_logging("INFO")
     completion = _FakeCompletionSequence(
         [
             {
@@ -841,19 +977,21 @@ def test_litellm_runner_keeps_network_tool_logs_out_of_info_terminal_output(caps
         cost_calculator=lambda _response, _model: 0.0,
     )
 
-    runner.run(
-        agent=AgentName.ARENA_SCOUT,
-        prompt=PromptBundle(
-            system_prompt="system",
-            user_prompt="user",
-            prompt_version="v-test",
-            prompt_hash="abc123",
-        ),
-        response_model=ArenaSearchResult,
-        tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
-        tool_executor=lambda _name, _arguments: {"status": "ok"},
-    )
+    stderr = StringIO()
+    with patch("truth_engine.services.logging.sys.stderr", stderr):
+        configure_logging("INFO")
+        runner.run(
+            agent=AgentName.ARENA_SCOUT,
+            prompt=PromptBundle(
+                system_prompt="system",
+                user_prompt="user",
+                prompt_version="v-test",
+                prompt_hash="abc123",
+            ),
+            response_model=ArenaSearchResult,
+            tools=tool_schemas_for_agent(AgentName.ARENA_SCOUT),
+            tool_executor=lambda _name, _arguments: {"status": "ok"},
+        )
 
-    stderr = capsys.readouterr().err
-    assert "search_web" not in stderr
+    assert "search_web" not in stderr.getvalue()
     _reset_truth_engine_logger()

@@ -42,8 +42,9 @@ def configure_logging(level: str = "INFO") -> None:
     """
     resolved_level = getattr(logging, level.upper(), logging.INFO)
     root = logging.getLogger("truth_engine")
-    if root.handlers:
-        return  # already configured
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
 
     handler = logging.StreamHandler(sys.stderr)
     if resolved_level <= logging.DEBUG:

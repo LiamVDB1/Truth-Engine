@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
+from truth_engine.activities.fixtures import FixtureActivityBundle
+from truth_engine.adapters.db.migrate import upgrade_database
+from truth_engine.adapters.db.repositories import TruthEngineRepository
 from truth_engine.cli.main import main
 from truth_engine.config.settings import Settings
 from truth_engine.domain.enums import AgentName, GateAction
+from truth_engine.workflows.candidate import CandidateWorkflowRunner
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "workflows"
 
@@ -146,6 +153,44 @@ def test_budget_safety_cap_kills_candidate_when_cost_exceeds_limit(tmp_path: Pat
     assert "safety cap" in outcome.final_decision.reason.lower()
 
 
+def test_workflow_resume_skips_completed_steps_after_interruption(tmp_path: Path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'truth_engine.db'}"
+    upgrade_database(database_url)
+    repository = TruthEngineRepository.from_database_url(database_url)
+    fixture_path = FIXTURE_ROOT / "investigate_revise_reachable.json"
+
+    first_attempt = _InterruptingFixtureBundle(
+        FixtureActivityBundle.from_path(fixture_path),
+        fail_on="landscape_research",
+    )
+    runner = CandidateWorkflowRunner(
+        repository=repository,
+        settings=Settings(database_url=database_url),
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        runner.run(first_attempt)
+
+    resumed_attempt = _InterruptingFixtureBundle(first_attempt.delegate)
+    resumed_runner = CandidateWorkflowRunner(
+        repository=repository,
+        settings=Settings(database_url=database_url),
+    )
+
+    outcome = resumed_runner.run(resumed_attempt)
+
+    assert outcome.status == "passed_gate_b"
+    assert resumed_attempt.calls["arena_discovery"] == 0
+    assert resumed_attempt.calls["landscape_research"] == 1
+    assert resumed_attempt.calls["signal_mining"] == 1
+    assert resumed_attempt.calls["normalization"] == 1
+    assert resumed_attempt.calls["scoring"] == 2
+    assert resumed_attempt.calls["skeptic"] == 2
+    assert resumed_attempt.calls["wedge_design"] == 2
+    assert resumed_attempt.calls["wedge_critique"] == 2
+    assert resumed_attempt.calls["channel_validation"] == 2
+
+
 def test_cli_preview_prompt_renders_compiled_prompt(tmp_path: Path) -> None:
     context_file = tmp_path / "context.json"
     context_file.write_text(
@@ -182,3 +227,54 @@ def test_cli_preview_prompt_renders_compiled_prompt(tmp_path: Path) -> None:
     assert "Return exactly one JSON object matching `SignalMiningResult`." in output
     assert "=== USER PROMPT ===" in output
     assert '"candidate_id": "cand_prompt"' in output
+
+
+class _InterruptingFixtureBundle:
+    persists_tool_state = False
+
+    def __init__(
+        self,
+        delegate: FixtureActivityBundle,
+        *,
+        fail_on: str | None = None,
+    ) -> None:
+        self.delegate = delegate
+        self.fail_on = fail_on
+        self.calls: Counter[str] = Counter()
+
+    @property
+    def candidate_id(self) -> str:
+        return self.delegate.candidate_id
+
+    def arena_discovery(self):
+        return self._call("arena_discovery")
+
+    def signal_mining(self, targeted_weakness: str | None = None):
+        return self._call("signal_mining", targeted_weakness)
+
+    def normalization(self):
+        return self._call("normalization")
+
+    def landscape_research(self):
+        return self._call("landscape_research")
+
+    def scoring(self):
+        return self._call("scoring")
+
+    def skeptic(self):
+        return self._call("skeptic")
+
+    def wedge_design(self):
+        return self._call("wedge_design")
+
+    def wedge_critique(self):
+        return self._call("wedge_critique")
+
+    def channel_validation(self):
+        return self._call("channel_validation")
+
+    def _call(self, name: str, *args):
+        self.calls[name] += 1
+        if self.fail_on == name:
+            raise RuntimeError("synthetic interruption")
+        return getattr(self.delegate, name)(*args)

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from truth_engine.contracts.models import CostRecord, ProblemUnit, RawArena, RawSignal
+from truth_engine.contracts.stages import LandscapeEntry
 from truth_engine.domain.enums import AgentName, Stage
 
 
@@ -118,3 +119,27 @@ def test_cost_record_captures_stage_and_agent_identity() -> None:
 
     assert record.stage is Stage.ARENA_DISCOVERY
     assert record.agent is AgentName.ARENA_SCOUT
+
+
+def test_landscape_entry_coerces_string_strengths_and_weaknesses() -> None:
+    entry = LandscapeEntry(
+        name="OpsFlow",
+        type="competitor",
+        status="active",
+        source_url="https://example.com/opsflow",
+        what_they_do="Workflow automation for operations teams.",
+        relevance="High overlap with the problem unit.",
+        strengths="Strong funding ($112M), broad integrations; strong enterprise adoption",
+        weaknesses="Complex setup\nRequires a platform team to manage",
+        lesson_for_us="Keep implementation lightweight for smaller teams.",
+    )
+
+    assert entry.strengths == [
+        "Strong funding ($112M)",
+        "broad integrations",
+        "strong enterprise adoption",
+    ]
+    assert entry.weaknesses == [
+        "Complex setup",
+        "Requires a platform team to manage",
+    ]

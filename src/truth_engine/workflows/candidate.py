@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -15,7 +16,17 @@ from truth_engine.contracts.decisions import (
     SkepticSnapshot,
     WedgeSnapshot,
 )
-from truth_engine.contracts.fixtures import SignalMiningFixtureRun
+from truth_engine.contracts.fixtures import (
+    ArenaDiscoveryFixture,
+    ChannelValidationFixtureRun,
+    LandscapeResearchFixture,
+    NormalizationFixtureRun,
+    ScoringFixtureRun,
+    SignalMiningFixtureRun,
+    SkepticFixtureRun,
+    WedgeCritiqueFixtureRun,
+    WedgeDesignFixtureRun,
+)
 from truth_engine.contracts.models import CostRecord, ProblemUnit
 from truth_engine.contracts.stages import (
     ActivityMetrics,
@@ -35,6 +46,7 @@ from truth_engine.domain.enums import (
     GateAction,
     SkepticRecommendation,
     Stage,
+    WorkflowStep,
 )
 from truth_engine.prompts.builder import build_prompt
 from truth_engine.services.budgets import candidate_budget_mode
@@ -70,74 +82,112 @@ class CandidateWorkflowRunner:
 
     def run(self, activities: ActivityBundle) -> WorkflowOutcome:
         candidate_id = activities.candidate_id
-        if self.repository.get_candidate(candidate_id) is None:
-            self.repository.create_candidate(candidate_id=candidate_id, status="running")
+        candidate = self.repository.get_candidate(candidate_id)
+        if candidate is None:
+            request_payload = None
+            live_request = getattr(activities, "request", None)
+            if isinstance(live_request, BaseModel):
+                request_payload = live_request.model_dump(mode="json")
+            self.repository.create_candidate(
+                candidate_id=candidate_id,
+                status="running",
+                request_payload=request_payload,
+            )
+        elif candidate.request_payload is None:
+            live_request = getattr(activities, "request", None)
+            if isinstance(live_request, BaseModel):
+                self.repository.update_candidate(
+                    candidate_id,
+                    request_payload=live_request.model_dump(mode="json"),
+                )
+        elif candidate.status == "passed_gate_b":
+            dossier = self.repository.load_dossier(candidate_id)
+            if dossier is None:
+                raise ValueError(
+                    f"Candidate {candidate_id} passed Gate B without a stored dossier."
+                )
+            final_decision = self._latest_decision_event(candidate_id)
+            if final_decision is None:
+                raise ValueError(f"Candidate {candidate_id} is missing its final decision event.")
+            return WorkflowOutcome(
+                candidate_id=candidate_id,
+                status="passed_gate_b",
+                final_decision=final_decision,
+                dossier=dossier,
+            )
+        elif candidate.status == "killed":
+            final_decision = self._latest_decision_event(candidate_id)
+            if final_decision is None:
+                raise ValueError(f"Candidate {candidate_id} is missing its kill decision event.")
+            return WorkflowOutcome(
+                candidate_id=candidate_id,
+                status="killed",
+                final_decision=final_decision,
+            )
         try:
-            caution_flags: list[str] = []
-            self._stage_start(candidate_id, "Arena Discovery", "arena_scout")
-            selected_arena = self._run_arena_discovery(candidate_id, activities)
-
-            self._stage_start(candidate_id, "Signal Mining", "signal_scout")
-            signal_run = activities.signal_mining()
-            self._run_signal_mining(
-                candidate_id,
-                signal_run,
-                attempt_index=0,
-                persists_tool_state=activities.persists_tool_state,
-            )
-            self._stage_done(
-                candidate_id,
-                "Signal Mining",
-                "signal_scout",
-                cost_eur=signal_run.metrics.cost_eur,
-            )
-            self._stage_start(candidate_id, "Normalization", "normalizer")
-            normalization_run = activities.normalization()
-            problem_units = normalization_run.result.problem_units
-            self._record_agent_stage_run(
+            selected_arena = self._checkpointed_step(
                 candidate_id=candidate_id,
-                stage=Stage.NORMALIZATION,
-                agent=AgentName.NORMALIZER,
+                step=WorkflowStep.ARENA_DISCOVERY,
                 attempt_index=0,
-                payload=normalization_run.result,
-                metrics=normalization_run.metrics,
-                context={
-                    "candidate_id": candidate_id,
-                    "stage": Stage.NORMALIZATION.value,
-                    "output_contract": "NormalizationResult",
-                },
+                stage_label="Arena Discovery",
+                agent_label="arena_scout",
+                execute=activities.arena_discovery,
+                apply=lambda run: self._apply_arena_discovery(
+                    candidate_id=candidate_id,
+                    activities=activities,
+                    run=run,
+                ),
+                model_type=ArenaDiscoveryFixture,
+                cost_of=lambda run: run.scout_metrics.cost_eur + run.evaluator_metrics.cost_eur,
+            ).evaluation.ranked_arenas[0]
+
+            self._checkpointed_step(
+                candidate_id=candidate_id,
+                step=WorkflowStep.SIGNAL_MINING,
+                attempt_index=0,
+                stage_label="Signal Mining",
+                agent_label="signal_scout",
+                execute=activities.signal_mining,
+                apply=lambda run: self._apply_signal_mining(
+                    candidate_id=candidate_id,
+                    run=run,
+                    attempt_index=0,
+                    persists_tool_state=activities.persists_tool_state,
+                ),
+                model_type=SignalMiningFixtureRun,
+                cost_of=lambda run: run.metrics.cost_eur,
             )
-            self.repository.replace_problem_units(candidate_id, problem_units)
-            self._stage_done(
-                candidate_id,
-                "Normalization",
-                "normalizer",
-                cost_eur=normalization_run.metrics.cost_eur,
-                summary=f"{len(problem_units)} problem units",
+            self._checkpointed_step(
+                candidate_id=candidate_id,
+                step=WorkflowStep.NORMALIZATION,
+                attempt_index=0,
+                stage_label="Normalization",
+                agent_label="normalizer",
+                execute=activities.normalization,
+                apply=lambda run: self._apply_normalization(
+                    candidate_id=candidate_id,
+                    run=run,
+                    attempt_index=0,
+                ),
+                model_type=NormalizationFixtureRun,
+                cost_of=lambda run: run.metrics.cost_eur,
+                summary=lambda run: f"{len(run.result.problem_units)} problem units",
             )
 
-            self._stage_start(candidate_id, "Landscape", "landscape_scout")
-            landscape = activities.landscape_research()
-            self._record_agent_stage_run(
+            self._checkpointed_step(
                 candidate_id=candidate_id,
-                stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
-                agent=AgentName.LANDSCAPE_SCOUT,
+                step=WorkflowStep.LANDSCAPE_RESEARCH,
                 attempt_index=0,
-                payload=landscape.result,
-                metrics=landscape.metrics,
-                context={
-                    "candidate_id": candidate_id,
-                    "stage": Stage.LANDSCAPE_SCORING_SKEPTIC.value,
-                    "output_contract": "LandscapeReport",
-                },
-            )
-            if not activities.persists_tool_state:
-                self.repository.replace_landscape_entries(candidate_id, landscape.entries)
-            self._stage_done(
-                candidate_id,
-                "Landscape",
-                "landscape_scout",
-                cost_eur=landscape.metrics.cost_eur,
+                stage_label="Landscape",
+                agent_label="landscape_scout",
+                execute=activities.landscape_research,
+                apply=lambda run: self._apply_landscape_research(
+                    candidate_id=candidate_id,
+                    activities=activities,
+                    run=run,
+                ),
+                model_type=LandscapeResearchFixture,
+                cost_of=lambda run: run.metrics.cost_eur,
             )
 
             selected_problem_unit: ProblemUnit | None = None
@@ -145,139 +195,132 @@ class CandidateWorkflowRunner:
             skeptic_result: SkepticReport | None = None
             gate_a_iteration = 0
             while True:
-                self._stage_start(
-                    candidate_id,
-                    "Scoring",
-                    "scorer",
-                    attempt=gate_a_iteration,
-                )
-                scoring_run = activities.scoring()
-                self._record_agent_stage_run(
+                scoring_attempt = gate_a_iteration
+                scoring_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
-                    agent=AgentName.SCORER,
-                    attempt_index=gate_a_iteration,
-                    payload=scoring_run.result,
-                    metrics=scoring_run.metrics,
-                    context={
-                        "candidate_id": candidate_id,
-                        "stage": Stage.LANDSCAPE_SCORING_SKEPTIC.value,
-                        "output_contract": "ScoringResult",
-                    },
+                    step=WorkflowStep.SCORING,
+                    attempt_index=scoring_attempt,
+                    stage_label="Scoring",
+                    agent_label="scorer",
+                    execute=activities.scoring,
+                    apply=lambda run, attempt_index=scoring_attempt: self._apply_scoring(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    ),
+                    model_type=ScoringFixtureRun,
+                    cost_of=lambda run: run.metrics.cost_eur,
+                    summary=lambda run: f"score={run.result.top_candidate.total_score}",
+                    attempt=scoring_attempt,
                 )
                 scoring_result = scoring_run.result.top_candidate
-                self.repository.update_candidate(
-                    candidate_id,
-                    current_stage=Stage.LANDSCAPE_SCORING_SKEPTIC.value,
-                    selected_problem_unit_id=scoring_result.problem_unit_id,
-                )
                 selected_problem_unit = self.repository.get_problem_unit(
                     candidate_id, scoring_result.problem_unit_id
                 )
                 if selected_problem_unit is None:
                     raise ValueError(f"Unknown problem unit: {scoring_result.problem_unit_id}")
-                self._stage_done(
-                    candidate_id,
-                    "Scoring",
-                    "scorer",
-                    cost_eur=scoring_run.metrics.cost_eur,
-                    summary=f"score={scoring_result.total_score}",
-                )
 
-                self._stage_start(
-                    candidate_id,
-                    "Skeptic",
-                    "skeptic",
-                    attempt=gate_a_iteration,
-                )
-                skeptic_run = activities.skeptic()
-                self._record_agent_stage_run(
+                skeptic_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
-                    agent=AgentName.SKEPTIC,
-                    attempt_index=gate_a_iteration,
-                    payload=skeptic_run.result,
-                    metrics=skeptic_run.metrics,
-                    context={
-                        "candidate_id": candidate_id,
-                        "stage": Stage.LANDSCAPE_SCORING_SKEPTIC.value,
-                        "output_contract": "SkepticReport",
-                    },
+                    step=WorkflowStep.SKEPTIC,
+                    attempt_index=scoring_attempt,
+                    stage_label="Skeptic",
+                    agent_label="skeptic",
+                    execute=activities.skeptic,
+                    apply=lambda run, attempt_index=scoring_attempt: self._apply_skeptic(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    ),
+                    model_type=SkepticFixtureRun,
+                    cost_of=lambda run: run.metrics.cost_eur,
+                    summary=lambda run: f"rec={run.result.recommendation}",
+                    attempt=scoring_attempt,
                 )
                 skeptic_result = skeptic_run.result
-                self._stage_done(
-                    candidate_id,
-                    "Skeptic",
-                    "skeptic",
-                    cost_eur=skeptic_run.metrics.cost_eur,
-                    summary=f"rec={skeptic_result.recommendation}",
-                )
 
-                gate_a_decision = decide_gate_a(
-                    score=CandidateScoreSnapshot(total_score=scoring_result.total_score),
-                    skeptic=SkepticSnapshot(
-                        recommendation=SkepticRecommendation(skeptic_result.recommendation)
-                    ),
-                    iteration=gate_a_iteration,
-                    max_iterations=self._optional_loop_limit(candidate_id),
-                )
-                gate_a_event = self._append_decision(
+                gate_a_event = self.repository.get_decision_event(
                     candidate_id=candidate_id,
                     stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
-                    action=gate_a_decision.action,
-                    reason=gate_a_decision.reason,
                     iteration=gate_a_iteration,
                 )
+                if gate_a_event is None:
+                    gate_a_decision = decide_gate_a(
+                        score=CandidateScoreSnapshot(total_score=scoring_result.total_score),
+                        skeptic=SkepticSnapshot(
+                            recommendation=SkepticRecommendation(skeptic_result.recommendation)
+                        ),
+                        iteration=gate_a_iteration,
+                        max_iterations=self._optional_loop_limit(candidate_id),
+                    )
+                    gate_a_event = self._append_decision(
+                        candidate_id=candidate_id,
+                        stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
+                        action=gate_a_decision.action,
+                        reason=gate_a_decision.reason,
+                        iteration=gate_a_iteration,
+                    )
                 self._gate_decision(
                     candidate_id,
                     "Gate A",
-                    gate_a_decision.action.value,
-                    gate_a_decision.reason,
+                    gate_a_event.action.value,
+                    gate_a_event.reason,
                     score=scoring_result.total_score,
                     budget_mode=self._budget_mode(candidate_id).value,
                 )
 
-                if gate_a_decision.action is GateAction.INVESTIGATE:
-                    self._stage_start(
-                        candidate_id,
-                        "Targeted Mining",
-                        "signal_scout",
-                        extra=f"weakness: {skeptic_result.primary_weakness}",
-                    )
-                    targeted_signal_run = activities.signal_mining(skeptic_result.primary_weakness)
-                    self._run_signal_mining(
-                        candidate_id,
-                        targeted_signal_run,
-                        attempt_index=gate_a_iteration + 1,
-                        persists_tool_state=activities.persists_tool_state,
-                    )
-                    targeted_normalization = activities.normalization()
-                    self._record_agent_stage_run(
+                if gate_a_event.action is GateAction.INVESTIGATE:
+                    targeted_attempt = gate_a_iteration + 1
+                    targeted_weakness = skeptic_result.primary_weakness
+                    self._checkpointed_step(
                         candidate_id=candidate_id,
-                        stage=Stage.NORMALIZATION,
-                        agent=AgentName.NORMALIZER,
-                        attempt_index=gate_a_iteration + 1,
-                        payload=targeted_normalization.result,
-                        metrics=targeted_normalization.metrics,
-                        context={
-                            "candidate_id": candidate_id,
-                            "stage": Stage.NORMALIZATION.value,
-                            "output_contract": "NormalizationResult",
-                            "targeted_weakness": skeptic_result.primary_weakness,
-                        },
+                        step=WorkflowStep.SIGNAL_MINING,
+                        attempt_index=targeted_attempt,
+                        stage_label="Targeted Mining",
+                        agent_label="signal_scout",
+                        execute=(
+                            lambda weakness=targeted_weakness: activities.signal_mining(weakness)
+                        ),
+                        apply=lambda run, attempt_index=targeted_attempt: self._apply_signal_mining(
+                            candidate_id=candidate_id,
+                            run=run,
+                            attempt_index=attempt_index,
+                            persists_tool_state=activities.persists_tool_state,
+                        ),
+                        model_type=SignalMiningFixtureRun,
+                        cost_of=lambda run: run.metrics.cost_eur,
+                        extra=f"weakness: {targeted_weakness}",
                     )
-                    self.repository.replace_problem_units(
-                        candidate_id, targeted_normalization.result.problem_units
+                    self._checkpointed_step(
+                        candidate_id=candidate_id,
+                        step=WorkflowStep.NORMALIZATION,
+                        attempt_index=targeted_attempt,
+                        stage_label="Normalization",
+                        agent_label="normalizer",
+                        execute=activities.normalization,
+                        apply=(
+                            lambda run,
+                            attempt_index=targeted_attempt,
+                            weakness=targeted_weakness: self._apply_normalization(
+                                candidate_id=candidate_id,
+                                run=run,
+                                attempt_index=attempt_index,
+                                targeted_weakness=weakness,
+                            )
+                        ),
+                        model_type=NormalizationFixtureRun,
+                        cost_of=lambda run: run.metrics.cost_eur,
+                        summary=lambda run: f"{len(run.result.problem_units)} problem units",
                     )
                     gate_a_iteration += 1
                     continue
 
-                if gate_a_decision.action is GateAction.KILL:
+                if gate_a_event.action is GateAction.KILL:
                     self._store_learnings(
                         candidate_id,
                         extract_kill_learnings(
                             candidate_id,
-                            gate_a_decision.reason,
+                            gate_a_event.reason,
                             arena=selected_arena,
                             scoring=scoring_result,
                             skeptic=skeptic_result,
@@ -285,95 +328,80 @@ class CandidateWorkflowRunner:
                     )
                     return self._kill_outcome(candidate_id, gate_a_event)
 
-                if gate_a_decision.action is GateAction.ADVANCE_WITH_CAUTION:
-                    caution_flags.append(gate_a_decision.reason)
                 break
 
             wedge_iteration = 0
             selected_wedge: WedgeHypothesis | None = None
             while True:
-                self._stage_start(
-                    candidate_id,
-                    "Wedge Design",
-                    "wedge_designer",
-                    attempt=wedge_iteration,
-                )
-                wedge_design_run = activities.wedge_design()
-                self._record_agent_stage_run(
+                wedge_attempt = wedge_iteration
+                wedge_design_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    stage=Stage.WEDGE_DESIGN,
-                    agent=AgentName.WEDGE_DESIGNER,
-                    attempt_index=wedge_iteration,
-                    payload=wedge_design_run.result,
-                    metrics=wedge_design_run.metrics,
-                    context={
-                        "candidate_id": candidate_id,
-                        "stage": Stage.WEDGE_DESIGN.value,
-                        "output_contract": "WedgeProposal",
-                    },
-                )
-                self._stage_done(
-                    candidate_id,
-                    "Wedge Design",
-                    "wedge_designer",
-                    cost_eur=wedge_design_run.metrics.cost_eur,
-                    summary=f"{len(wedge_design_run.result.wedges)} wedges",
-                )
-
-                self._stage_start(
-                    candidate_id,
-                    "Wedge Critique",
-                    "wedge_critic",
-                    attempt=wedge_iteration,
-                )
-                wedge_critique_run = activities.wedge_critique()
-                self._record_agent_stage_run(
-                    candidate_id=candidate_id,
-                    stage=Stage.WEDGE_DESIGN,
-                    agent=AgentName.WEDGE_CRITIC,
-                    attempt_index=wedge_iteration,
-                    payload=wedge_critique_run.result,
-                    metrics=wedge_critique_run.metrics,
-                    context={
-                        "candidate_id": candidate_id,
-                        "stage": Stage.WEDGE_DESIGN.value,
-                        "output_contract": "WedgeCritique",
-                    },
-                )
-                self._stage_done(
-                    candidate_id,
-                    "Wedge Critique",
-                    "wedge_critic",
-                    cost_eur=wedge_critique_run.metrics.cost_eur,
-                    summary=f"best={wedge_critique_run.result.best_wedge_index}",
-                )
-
-                wedge_decision = decide_wedge_path(
-                    wedge=WedgeSnapshot(
-                        verdict=wedge_verdict_for_critique(wedge_critique_run.result)
+                    step=WorkflowStep.WEDGE_DESIGN,
+                    attempt_index=wedge_attempt,
+                    stage_label="Wedge Design",
+                    agent_label="wedge_designer",
+                    execute=activities.wedge_design,
+                    apply=lambda run, attempt_index=wedge_attempt: self._apply_wedge_design(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
                     ),
-                    iteration=wedge_iteration,
-                    max_iterations=self._optional_loop_limit(candidate_id),
+                    model_type=WedgeDesignFixtureRun,
+                    cost_of=lambda run: run.metrics.cost_eur,
+                    summary=lambda run: f"{len(run.result.wedges)} wedges",
+                    attempt=wedge_attempt,
                 )
-                wedge_event = self._append_decision(
+
+                wedge_critique_run = self._checkpointed_step(
+                    candidate_id=candidate_id,
+                    step=WorkflowStep.WEDGE_CRITIQUE,
+                    attempt_index=wedge_attempt,
+                    stage_label="Wedge Critique",
+                    agent_label="wedge_critic",
+                    execute=activities.wedge_critique,
+                    apply=lambda run, attempt_index=wedge_attempt: self._apply_wedge_critique(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
+                    ),
+                    model_type=WedgeCritiqueFixtureRun,
+                    cost_of=lambda run: run.metrics.cost_eur,
+                    summary=lambda run: f"best={run.result.best_wedge_index}",
+                    attempt=wedge_attempt,
+                )
+
+                wedge_event = self.repository.get_decision_event(
                     candidate_id=candidate_id,
                     stage=Stage.WEDGE_DESIGN,
-                    action=wedge_decision.action,
-                    reason=wedge_decision.reason,
                     iteration=wedge_iteration,
                 )
+                if wedge_event is None:
+                    wedge_decision = decide_wedge_path(
+                        wedge=WedgeSnapshot(
+                            verdict=wedge_verdict_for_critique(wedge_critique_run.result)
+                        ),
+                        iteration=wedge_iteration,
+                        max_iterations=self._optional_loop_limit(candidate_id),
+                    )
+                    wedge_event = self._append_decision(
+                        candidate_id=candidate_id,
+                        stage=Stage.WEDGE_DESIGN,
+                        action=wedge_decision.action,
+                        reason=wedge_decision.reason,
+                        iteration=wedge_iteration,
+                    )
                 self._gate_decision(
                     candidate_id,
                     "Wedge Path",
-                    wedge_decision.action.value,
-                    wedge_decision.reason,
+                    wedge_event.action.value,
+                    wedge_event.reason,
                     budget_mode=self._budget_mode(candidate_id).value,
                 )
 
-                if wedge_decision.action is GateAction.KILL:
+                if wedge_event.action is GateAction.KILL:
                     return self._kill_outcome(candidate_id, wedge_event)
 
-                if wedge_decision.action is GateAction.ADVANCE:
+                if wedge_event.action is GateAction.ADVANCE:
                     best_index = wedge_critique_run.result.best_wedge_index
                     selected_wedge = wedge_design_run.result.wedges[best_index]
                     self.repository.replace_wedges(
@@ -395,76 +423,65 @@ class CandidateWorkflowRunner:
 
             gate_b_retry_index = 0
             while True:
-                self._stage_start(
-                    candidate_id,
-                    "Buyer/Channel",
-                    "buyer_channel_validator",
-                    attempt=gate_b_retry_index,
-                )
-                channel_validation_run = activities.channel_validation()
-                self._record_agent_stage_run(
+                channel_attempt = gate_b_retry_index
+                channel_validation_run = self._checkpointed_step(
                     candidate_id=candidate_id,
-                    stage=Stage.BUYER_CHANNEL,
-                    agent=AgentName.BUYER_CHANNEL_VALIDATOR,
-                    attempt_index=gate_b_retry_index,
-                    payload=channel_validation_run.result,
-                    metrics=channel_validation_run.metrics,
-                    context={
-                        "candidate_id": candidate_id,
-                        "stage": Stage.BUYER_CHANNEL.value,
-                        "output_contract": "ChannelValidation",
-                    },
-                )
-                self._stage_done(
-                    candidate_id,
-                    "Buyer/Channel",
-                    "buyer_channel_validator",
-                    cost_eur=channel_validation_run.metrics.cost_eur,
-                    summary=(
-                        f"verdict={channel_validation_run.result.verdict.value} "
-                        f"leads={channel_validation_run.result.total_reachable_leads}"
+                    step=WorkflowStep.CHANNEL_VALIDATION,
+                    attempt_index=channel_attempt,
+                    stage_label="Buyer/Channel",
+                    agent_label="buyer_channel_validator",
+                    execute=activities.channel_validation,
+                    apply=lambda run, attempt_index=channel_attempt: self._apply_channel_validation(
+                        candidate_id=candidate_id,
+                        run=run,
+                        attempt_index=attempt_index,
                     ),
-                )
-                self.repository.replace_channel_plans(
-                    candidate_id,
-                    gate_b_retry_index,
-                    [
-                        plan.model_dump(mode="json")
-                        for plan in channel_validation_run.result.channels
-                    ],
+                    model_type=ChannelValidationFixtureRun,
+                    cost_of=lambda run: run.metrics.cost_eur,
+                    summary=lambda run: (
+                        f"verdict={run.result.verdict.value} "
+                        f"leads={run.result.total_reachable_leads}"
+                    ),
+                    attempt=channel_attempt,
                 )
 
-                gate_b_decision = decide_gate_b(
-                    validation=ChannelValidationSnapshot(
-                        verdict=channel_validation_run.result.verdict,
-                        total_reachable_leads=channel_validation_run.result.total_reachable_leads,
-                        channel_count=len(channel_validation_run.result.channels),
-                        user_role=channel_validation_run.result.user_role,
-                        buyer_role=channel_validation_run.result.buyer_role,
-                        buyer_is_user=channel_validation_run.result.buyer_is_user,
-                        estimated_cost_per_conversation=channel_validation_run.result.estimated_cost_per_conversation,
-                    ),
-                    retries_used=gate_b_retry_index,
-                    max_retries=self._optional_retry_limit(candidate_id),
-                )
-                gate_b_event = self._append_decision(
+                gate_b_event = self.repository.get_decision_event(
                     candidate_id=candidate_id,
                     stage=Stage.BUYER_CHANNEL,
-                    action=gate_b_decision.action,
-                    reason=gate_b_decision.reason,
                     iteration=gate_b_retry_index,
                 )
+                if gate_b_event is None:
+                    gate_b_decision = decide_gate_b(
+                        validation=ChannelValidationSnapshot(
+                            verdict=channel_validation_run.result.verdict,
+                            total_reachable_leads=channel_validation_run.result.total_reachable_leads,
+                            channel_count=len(channel_validation_run.result.channels),
+                            user_role=channel_validation_run.result.user_role,
+                            buyer_role=channel_validation_run.result.buyer_role,
+                            buyer_is_user=channel_validation_run.result.buyer_is_user,
+                            estimated_cost_per_conversation=channel_validation_run.result.estimated_cost_per_conversation,
+                        ),
+                        retries_used=gate_b_retry_index,
+                        max_retries=self._optional_retry_limit(candidate_id),
+                    )
+                    gate_b_event = self._append_decision(
+                        candidate_id=candidate_id,
+                        stage=Stage.BUYER_CHANNEL,
+                        action=gate_b_decision.action,
+                        reason=gate_b_decision.reason,
+                        iteration=gate_b_retry_index,
+                    )
                 self._gate_decision(
                     candidate_id,
                     "Gate B",
-                    gate_b_decision.action.value,
-                    gate_b_decision.reason,
+                    gate_b_event.action.value,
+                    gate_b_event.reason,
                     budget_mode=self._budget_mode(candidate_id).value,
                 )
-                if gate_b_decision.action is GateAction.RETRY:
+                if gate_b_event.action is GateAction.RETRY:
                     gate_b_retry_index += 1
                     continue
-                if gate_b_decision.action is GateAction.KILL:
+                if gate_b_event.action is GateAction.KILL:
                     return self._kill_outcome(candidate_id, gate_b_event)
 
                 dossier = self._build_dossier(
@@ -474,7 +491,7 @@ class CandidateWorkflowRunner:
                     scoring=scoring_result,
                     skeptic=skeptic_result,
                     selected_wedge=selected_wedge,
-                    caution_flags=caution_flags,
+                    caution_flags=self._caution_flags(candidate_id),
                     channel_validation=channel_validation_run.result,
                 )
                 self.repository.store_dossier(candidate_id, dossier)
@@ -513,70 +530,134 @@ class CandidateWorkflowRunner:
                 self.trace_writer.error(stage="workflow", error=error)
             raise
 
-    def _run_arena_discovery(self, candidate_id: str, activities: ActivityBundle) -> EvaluatedArena:
-        arena_discovery = activities.arena_discovery()
-        self._record_agent_stage_run(
-            candidate_id=candidate_id,
-            stage=Stage.ARENA_DISCOVERY,
-            agent=AgentName.ARENA_SCOUT,
-            attempt_index=0,
-            payload=arena_discovery.search_result,
-            metrics=arena_discovery.scout_metrics,
-            context={
-                "candidate_id": candidate_id,
-                "stage": Stage.ARENA_DISCOVERY.value,
-                "output_contract": "ArenaSearchResult",
-            },
+    def _checkpointed_step(
+        self,
+        *,
+        candidate_id: str,
+        step: WorkflowStep,
+        attempt_index: int,
+        stage_label: str,
+        agent_label: str,
+        execute: Callable[[], BaseModel],
+        apply: Callable[[BaseModel], None],
+        model_type: type[BaseModel],
+        cost_of: Callable[[BaseModel], float],
+        summary: Callable[[BaseModel], str] | None = None,
+        attempt: int = 0,
+        extra: str = "",
+    ) -> Any:
+        checkpoint = self.repository.load_workflow_checkpoint(candidate_id, step, attempt_index)
+        start_extra = extra
+        if checkpoint is not None:
+            start_extra = f"{extra} | resume checkpoint".strip(" |")
+        self._stage_start(
+            candidate_id,
+            stage_label,
+            agent_label,
+            attempt=attempt,
+            extra=start_extra,
         )
+        if checkpoint is not None:
+            result = model_type.model_validate(checkpoint.payload)
+            self._stage_done(
+                candidate_id,
+                stage_label,
+                agent_label,
+                cost_eur=0.0,
+                summary=(summary(result) if summary is not None else "resumed from checkpoint"),
+            )
+            return result
+
+        result = execute()
+        apply(result)
+        self.repository.store_workflow_checkpoint(
+            candidate_id=candidate_id,
+            step=step,
+            attempt_index=attempt_index,
+            payload=result.model_dump(mode="json"),
+        )
+        self._stage_done(
+            candidate_id,
+            stage_label,
+            agent_label,
+            cost_eur=cost_of(result),
+            summary=summary(result) if summary is not None else "",
+        )
+        return result
+
+    def _apply_arena_discovery(
+        self,
+        *,
+        candidate_id: str,
+        activities: ActivityBundle,
+        run: ArenaDiscoveryFixture,
+    ) -> None:
+        if self.repository.get_stage_run(candidate_id, AgentName.ARENA_SCOUT, 0) is None:
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.ARENA_DISCOVERY,
+                agent=AgentName.ARENA_SCOUT,
+                attempt_index=0,
+                payload=run.search_result,
+                metrics=run.scout_metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.ARENA_DISCOVERY.value,
+                    "output_contract": "ArenaSearchResult",
+                },
+            )
         if not activities.persists_tool_state:
-            for arena in arena_discovery.raw_arenas:
+            for arena in run.raw_arenas:
                 self.tool_runtime.invoke(
                     AgentName.ARENA_SCOUT,
                     "create_arena_proposal",
                     {"candidate_id": candidate_id, "arena": arena},
                 )
-
-        self._record_agent_stage_run(
-            candidate_id=candidate_id,
-            stage=Stage.ARENA_DISCOVERY,
-            agent=AgentName.ARENA_EVALUATOR,
-            attempt_index=0,
-            payload=arena_discovery.evaluation,
-            metrics=arena_discovery.evaluator_metrics,
-            context={
-                "candidate_id": candidate_id,
-                "stage": Stage.ARENA_DISCOVERY.value,
-                "output_contract": "ArenaEvaluation",
-            },
-        )
-        selected_arena = arena_discovery.evaluation.ranked_arenas[0]
+        if self.repository.get_stage_run(candidate_id, AgentName.ARENA_EVALUATOR, 0) is None:
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.ARENA_DISCOVERY,
+                agent=AgentName.ARENA_EVALUATOR,
+                attempt_index=0,
+                payload=run.evaluation,
+                metrics=run.evaluator_metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.ARENA_DISCOVERY.value,
+                    "output_contract": "ArenaEvaluation",
+                },
+            )
+        selected_arena = run.evaluation.ranked_arenas[0]
         self.repository.update_candidate(candidate_id, current_stage=Stage.ARENA_DISCOVERY.value)
         if selected_arena.arena.id is not None:
             self.repository.set_selected_arena(candidate_id, selected_arena.arena.id)
-        return selected_arena
 
-    def _run_signal_mining(
+    def _apply_signal_mining(
         self,
+        *,
         candidate_id: str,
         run: SignalMiningFixtureRun,
         attempt_index: int,
-        *,
         persists_tool_state: bool = False,
     ) -> None:
-        self._record_agent_stage_run(
-            candidate_id=candidate_id,
-            stage=Stage.SIGNAL_MINING,
-            agent=AgentName.SIGNAL_SCOUT,
-            attempt_index=attempt_index,
-            payload=run.result,
-            metrics=run.metrics,
-            context={
-                "candidate_id": candidate_id,
-                "stage": Stage.SIGNAL_MINING.value,
-                "output_contract": "SignalMiningResult",
-                "targeted_weakness": run.targeted_weakness,
-            },
-        )
+        if (
+            self.repository.get_stage_run(candidate_id, AgentName.SIGNAL_SCOUT, attempt_index)
+            is None
+        ):
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.SIGNAL_MINING,
+                agent=AgentName.SIGNAL_SCOUT,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.SIGNAL_MINING.value,
+                    "output_contract": "SignalMiningResult",
+                    "targeted_weakness": run.targeted_weakness,
+                },
+            )
         if not persists_tool_state:
             for signal in run.raw_signals:
                 self.tool_runtime.invoke(
@@ -584,6 +665,191 @@ class CandidateWorkflowRunner:
                     "add_signal",
                     {"candidate_id": candidate_id, "signal": signal},
                 )
+
+    def _apply_normalization(
+        self,
+        *,
+        candidate_id: str,
+        run: NormalizationFixtureRun,
+        attempt_index: int,
+        targeted_weakness: str | None = None,
+    ) -> None:
+        if self.repository.get_stage_run(candidate_id, AgentName.NORMALIZER, attempt_index) is None:
+            context = {
+                "candidate_id": candidate_id,
+                "stage": Stage.NORMALIZATION.value,
+                "output_contract": "NormalizationResult",
+            }
+            if targeted_weakness is not None:
+                context["targeted_weakness"] = targeted_weakness
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.NORMALIZATION,
+                agent=AgentName.NORMALIZER,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context=context,
+            )
+        self.repository.replace_problem_units(candidate_id, run.result.problem_units)
+
+    def _apply_landscape_research(
+        self,
+        *,
+        candidate_id: str,
+        activities: ActivityBundle,
+        run: LandscapeResearchFixture,
+    ) -> None:
+        if self.repository.get_stage_run(candidate_id, AgentName.LANDSCAPE_SCOUT, 0) is None:
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
+                agent=AgentName.LANDSCAPE_SCOUT,
+                attempt_index=0,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.LANDSCAPE_SCORING_SKEPTIC.value,
+                    "output_contract": "LandscapeReport",
+                },
+            )
+        if not activities.persists_tool_state:
+            self.repository.replace_landscape_entries(candidate_id, run.entries)
+
+    def _apply_scoring(
+        self,
+        *,
+        candidate_id: str,
+        run: ScoringFixtureRun,
+        attempt_index: int,
+    ) -> None:
+        if self.repository.get_stage_run(candidate_id, AgentName.SCORER, attempt_index) is None:
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
+                agent=AgentName.SCORER,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.LANDSCAPE_SCORING_SKEPTIC.value,
+                    "output_contract": "ScoringResult",
+                },
+            )
+        top_candidate = run.result.top_candidate
+        self.repository.update_candidate(
+            candidate_id,
+            current_stage=Stage.LANDSCAPE_SCORING_SKEPTIC.value,
+            selected_problem_unit_id=top_candidate.problem_unit_id,
+        )
+
+    def _apply_skeptic(
+        self,
+        *,
+        candidate_id: str,
+        run: SkepticFixtureRun,
+        attempt_index: int,
+    ) -> None:
+        if self.repository.get_stage_run(candidate_id, AgentName.SKEPTIC, attempt_index) is None:
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.LANDSCAPE_SCORING_SKEPTIC,
+                agent=AgentName.SKEPTIC,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.LANDSCAPE_SCORING_SKEPTIC.value,
+                    "output_contract": "SkepticReport",
+                },
+            )
+
+    def _apply_wedge_design(
+        self,
+        *,
+        candidate_id: str,
+        run: WedgeDesignFixtureRun,
+        attempt_index: int,
+    ) -> None:
+        if (
+            self.repository.get_stage_run(candidate_id, AgentName.WEDGE_DESIGNER, attempt_index)
+            is None
+        ):
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.WEDGE_DESIGN,
+                agent=AgentName.WEDGE_DESIGNER,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.WEDGE_DESIGN.value,
+                    "output_contract": "WedgeProposal",
+                },
+            )
+
+    def _apply_wedge_critique(
+        self,
+        *,
+        candidate_id: str,
+        run: WedgeCritiqueFixtureRun,
+        attempt_index: int,
+    ) -> None:
+        if (
+            self.repository.get_stage_run(candidate_id, AgentName.WEDGE_CRITIC, attempt_index)
+            is None
+        ):
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.WEDGE_DESIGN,
+                agent=AgentName.WEDGE_CRITIC,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.WEDGE_DESIGN.value,
+                    "output_contract": "WedgeCritique",
+                },
+            )
+
+    def _apply_channel_validation(
+        self,
+        *,
+        candidate_id: str,
+        run: ChannelValidationFixtureRun,
+        attempt_index: int,
+    ) -> None:
+        if (
+            self.repository.get_stage_run(
+                candidate_id,
+                AgentName.BUYER_CHANNEL_VALIDATOR,
+                attempt_index,
+            )
+            is None
+        ):
+            self._record_agent_stage_run(
+                candidate_id=candidate_id,
+                stage=Stage.BUYER_CHANNEL,
+                agent=AgentName.BUYER_CHANNEL_VALIDATOR,
+                attempt_index=attempt_index,
+                payload=run.result,
+                metrics=run.metrics,
+                context={
+                    "candidate_id": candidate_id,
+                    "stage": Stage.BUYER_CHANNEL.value,
+                    "output_contract": "ChannelValidation",
+                },
+            )
+        self.repository.replace_channel_plans(
+            candidate_id,
+            attempt_index,
+            [plan.model_dump(mode="json") for plan in run.result.channels],
+        )
 
     def _record_agent_stage_run(
         self,
@@ -643,6 +909,19 @@ class CandidateWorkflowRunner:
             metadata={"budget_mode": self._budget_mode(candidate_id).value},
         )
         return self.repository.append_decision_event(event)
+
+    def _latest_decision_event(self, candidate_id: str) -> DecisionEvent | None:
+        events = self.repository.list_decision_events(candidate_id)
+        if not events:
+            return None
+        return events[-1]
+
+    def _caution_flags(self, candidate_id: str) -> list[str]:
+        return [
+            event.reason
+            for event in self.repository.list_decision_events(candidate_id)
+            if event.action is GateAction.ADVANCE_WITH_CAUTION
+        ]
 
     def _kill_outcome(self, candidate_id: str, event: DecisionEvent) -> WorkflowOutcome:
         self.repository.update_candidate(candidate_id, current_stage=event.stage.value)

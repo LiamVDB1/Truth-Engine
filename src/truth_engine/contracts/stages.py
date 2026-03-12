@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from truth_engine.domain.enums import ChannelVerdict, GateAction, Stage, WedgeVerdict
 
@@ -77,6 +78,15 @@ class LandscapeEntry(BaseModel):
     years_active: str | None = None
     funding_raised: str | None = None
     lesson_for_us: str
+
+    @field_validator("strengths", "weaknesses", mode="before")
+    @classmethod
+    def _coerce_string_list(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        parts = [part.strip(" -\t") for part in re.split(r"[\n;,]+", value)]
+        normalized = [part for part in parts if part]
+        return normalized or None
 
 
 class LandscapeReport(BaseModel):
@@ -237,6 +247,7 @@ class CandidateRecord(BaseModel):
     selected_wedge_id: str | None = None
     total_cost_eur: float = Field(default=0.0, ge=0.0)
     dossier_payload: dict[str, Any] | None = None
+    request_payload: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

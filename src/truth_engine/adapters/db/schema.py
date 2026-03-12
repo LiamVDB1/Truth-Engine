@@ -27,6 +27,37 @@ candidate_table = Table(
     Column("selected_wedge_id", String(255), nullable=True),
     Column("total_cost_eur", Float, nullable=False, default=0.0),
     Column("dossier_payload", JSON, nullable=True),
+    Column("request_payload", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+workflow_checkpoint_table = Table(
+    "workflow_checkpoint",
+    metadata,
+    Column("id", String(255), primary_key=True),
+    Column("candidate_id", String(255), nullable=False, index=True),
+    Column("step", String(64), nullable=False),
+    Column("attempt_index", Integer, nullable=False, default=0),
+    Column("payload", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+agent_checkpoint_table = Table(
+    "agent_checkpoint",
+    metadata,
+    Column("id", String(255), primary_key=True),
+    Column("candidate_id", String(255), nullable=False, index=True),
+    Column("stage", String(64), nullable=False),
+    Column("agent", String(64), nullable=False),
+    Column("attempt_index", Integer, nullable=False, default=0),
+    Column("status", String(64), nullable=False),
+    Column("prompt_version", String(128), nullable=False),
+    Column("prompt_hash", String(64), nullable=False),
+    Column("model_alias", String(128), nullable=False),
+    Column("response_model", String(128), nullable=False),
+    Column("state_payload", JSON, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )

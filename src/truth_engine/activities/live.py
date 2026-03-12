@@ -33,7 +33,7 @@ from truth_engine.contracts.stages import (
     WedgeHypothesis,
     WedgeProposal,
 )
-from truth_engine.domain.enums import AgentName, Stage
+from truth_engine.domain.enums import AgentName, Stage, WorkflowStep
 from truth_engine.prompts.builder import build_prompt
 from truth_engine.tools.runtime import RepositoryToolRuntime
 from truth_engine.tools.schemas import tool_schemas_for_agent
@@ -99,6 +99,7 @@ class LiveActivityBundle:
             ),
             tool_executor=self._tool_executor(AgentName.ARENA_SCOUT),
             required_tool_names={"create_arena_proposal"},
+            **self._checkpoint_args(AgentName.ARENA_SCOUT, Stage.ARENA_DISCOVERY),
         )
 
         raw_arenas = self.repository.load_arena_proposals(self.candidate_id)
@@ -122,6 +123,7 @@ class LiveActivityBundle:
             response_model=ArenaEvaluation,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.ARENA_EVALUATOR, Stage.ARENA_DISCOVERY),
         )
         evaluation = _hydrate_evaluation(evaluator_execution.result, raw_arenas)
         self._selected_arena = evaluation.ranked_arenas[0]
@@ -165,6 +167,7 @@ class LiveActivityBundle:
             ),
             tool_executor=self._tool_executor(AgentName.SIGNAL_SCOUT),
             required_tool_names={"add_signal"},
+            **self._checkpoint_args(AgentName.SIGNAL_SCOUT, Stage.SIGNAL_MINING),
         )
         return SignalMiningFixtureRun(
             targeted_weakness=targeted_weakness,
@@ -192,6 +195,7 @@ class LiveActivityBundle:
             response_model=NormalizationResult,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.NORMALIZER, Stage.NORMALIZATION),
         )
         return NormalizationFixtureRun(metrics=execution.metrics, result=execution.result)
 
@@ -227,6 +231,7 @@ class LiveActivityBundle:
             ),
             tool_executor=self._tool_executor(AgentName.LANDSCAPE_SCOUT),
             required_tool_names={"add_landscape_entry"},
+            **self._checkpoint_args(AgentName.LANDSCAPE_SCOUT, Stage.LANDSCAPE_SCORING_SKEPTIC),
         )
         self._latest_landscape_report = execution.result
         return LandscapeResearchFixture(
@@ -260,6 +265,7 @@ class LiveActivityBundle:
             response_model=ScoringResult,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.SCORER, Stage.LANDSCAPE_SCORING_SKEPTIC),
         )
         self._latest_scoring_result = execution.result
         return ScoringFixtureRun(metrics=execution.metrics, result=execution.result)
@@ -296,6 +302,7 @@ class LiveActivityBundle:
             response_model=SkepticReport,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.SKEPTIC, Stage.LANDSCAPE_SCORING_SKEPTIC),
         )
         self._latest_skeptic_report = execution.result
         return SkepticFixtureRun(metrics=execution.metrics, result=execution.result)
@@ -324,6 +331,7 @@ class LiveActivityBundle:
             response_model=WedgeProposal,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.WEDGE_DESIGNER, Stage.WEDGE_DESIGN),
         )
         self._latest_wedge_proposal = _assign_wedge_ids(execution.result)
         return WedgeDesignFixtureRun(metrics=execution.metrics, result=self._latest_wedge_proposal)
@@ -350,6 +358,7 @@ class LiveActivityBundle:
             response_model=WedgeCritique,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.WEDGE_CRITIC, Stage.WEDGE_DESIGN),
         )
         self._latest_wedge_critique = execution.result
         return WedgeCritiqueFixtureRun(metrics=execution.metrics, result=execution.result)
@@ -378,6 +387,7 @@ class LiveActivityBundle:
             response_model=ChannelValidation,
             tools=None,
             tool_executor=None,
+            **self._checkpoint_args(AgentName.BUYER_CHANNEL_VALIDATOR, Stage.BUYER_CHANNEL),
         )
         return ChannelValidationFixtureRun(metrics=execution.metrics, result=execution.result)
 
@@ -388,34 +398,105 @@ class LiveActivityBundle:
 
         return execute
 
+    def _checkpoint_args(self, agent: AgentName, stage: Stage) -> dict[str, Any]:
+        return {
+            "checkpoint_candidate_id": self.candidate_id,
+            "checkpoint_stage": stage,
+            "checkpoint_attempt_index": self.repository.count_stage_runs(self.candidate_id, agent),
+        }
+
     def _require_selected_arena(self) -> EvaluatedArena:
+        if self._selected_arena is None:
+            checkpoint = self.repository.load_workflow_checkpoint(
+                self.candidate_id,
+                WorkflowStep.ARENA_DISCOVERY,
+                0,
+            )
+            if checkpoint is not None:
+                arena_discovery = ArenaDiscoveryFixture.model_validate(checkpoint.payload)
+                self._selected_arena = arena_discovery.evaluation.ranked_arenas[0]
+            else:
+                stage_run = self.repository.get_stage_run(
+                    self.candidate_id,
+                    AgentName.ARENA_EVALUATOR,
+                    0,
+                )
+                raw_arenas = self.repository.load_arena_proposals(self.candidate_id)
+                if stage_run is not None and raw_arenas:
+                    evaluation = _hydrate_evaluation(
+                        ArenaEvaluation.model_validate(stage_run.payload),
+                        raw_arenas,
+                    )
+                    self._selected_arena = evaluation.ranked_arenas[0]
         if self._selected_arena is None:
             raise ValueError("Selected arena is not available yet.")
         return self._selected_arena
 
     def _require_landscape_report(self) -> LandscapeReport:
         if self._latest_landscape_report is None:
+            checkpoint = self.repository.load_workflow_checkpoint(
+                self.candidate_id,
+                WorkflowStep.LANDSCAPE_RESEARCH,
+                0,
+            )
+            if checkpoint is not None:
+                self._latest_landscape_report = LandscapeResearchFixture.model_validate(
+                    checkpoint.payload
+                ).result
+            else:
+                stage_run = self.repository.latest_stage_run(
+                    self.candidate_id,
+                    AgentName.LANDSCAPE_SCOUT,
+                )
+                if stage_run is not None:
+                    self._latest_landscape_report = LandscapeReport.model_validate(
+                        stage_run.payload
+                    )
+        if self._latest_landscape_report is None:
             raise ValueError("Landscape report is not available yet.")
         return self._latest_landscape_report
 
     def _require_scoring_result(self) -> ScoringResult:
+        if self._latest_scoring_result is None:
+            stage_run = self.repository.latest_stage_run(self.candidate_id, AgentName.SCORER)
+            if stage_run is not None:
+                self._latest_scoring_result = ScoringResult.model_validate(stage_run.payload)
         if self._latest_scoring_result is None:
             raise ValueError("Scoring result is not available yet.")
         return self._latest_scoring_result
 
     def _require_skeptic_report(self) -> SkepticReport:
         if self._latest_skeptic_report is None:
+            stage_run = self.repository.latest_stage_run(self.candidate_id, AgentName.SKEPTIC)
+            if stage_run is not None:
+                self._latest_skeptic_report = SkepticReport.model_validate(stage_run.payload)
+        if self._latest_skeptic_report is None:
             raise ValueError("Skeptic report is not available yet.")
         return self._latest_skeptic_report
 
     def _require_wedge_proposal(self) -> WedgeProposal:
         if self._latest_wedge_proposal is None:
+            stage_run = self.repository.latest_stage_run(
+                self.candidate_id,
+                AgentName.WEDGE_DESIGNER,
+            )
+            if stage_run is not None:
+                self._latest_wedge_proposal = WedgeProposal.model_validate(stage_run.payload)
+        if self._latest_wedge_proposal is None:
             raise ValueError("Wedge proposal is not available yet.")
         return self._latest_wedge_proposal
 
     def _selected_wedge(self) -> WedgeHypothesis:
+        selected_wedge = self.repository.get_selected_wedge(self.candidate_id)
+        if selected_wedge is not None:
+            return WedgeHypothesis.model_validate(selected_wedge)
         wedge_proposal = self._require_wedge_proposal()
         critique = self._latest_wedge_critique
+        if critique is None:
+            stage_run = self.repository.latest_stage_run(self.candidate_id, AgentName.WEDGE_CRITIC)
+            if stage_run is not None:
+                critique = WedgeCritique.model_validate(stage_run.payload)
+                self._latest_wedge_critique = critique
         if critique is None:
             raise ValueError("Wedge critique is not available yet.")
         return wedge_proposal.wedges[critique.best_wedge_index]
